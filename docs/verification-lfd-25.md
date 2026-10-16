@@ -161,7 +161,7 @@ No se abre PR, fusiona, elimina rama ni modifica Jira. La entrega queda sujeta a
 - actionlint 1.7.12: OK, workflow intacto, tres jobs conservados.
 - Comprobador de enlaces reproducible documentado en verification-lfd-82.md: OK, 17 Markdown, 99 enlaces locales, 0 errores.
 - Sintaxis Python mediante ast.parse y git diff --check: OK. Sin dependencias nuevas ni secretos en SQL; contraseñas efímeras se comprueban contra logs en memoria.
-- El CI de esta continuación se verificará para el commit publicado; no debe confundirse con el CI histórico baad69a. Su URL y resultado se incorporan tras la ejecución real.
+- El CI de esta continuación se comprobó para el commit publicado e29cc823; su ejecución real se registra abajo, separada del CI histórico baad69a.
 
 
 Historial observado en la ejecución local final corregida (todas success=true):
@@ -175,3 +175,18 @@ Historial observado en la ejecución local final corregida (todas success=true):
 | 5 | 1729249324 |
 
 La ejecución final terminó con `All isolated migration checks passed. Shared PostgreSQL was not contacted.` Incluye la aserción de destinos FK/NO ACTION corregida, ausencia de triggers funcionales y recuperación exitosa tras DDL fallido.
+
+
+### CI comprobado — implementación de las 29 tablas
+
+[GitHub Actions 38961773238](https://github.com/rialespe/LS_Framework/actions/runs/38961773238), SHA **e29cc823609536650c9f28af9ff1857be3ec4d5c**, completado **success** el 2026-10-16. Se consultaron run/jobs y los logs completos descargados de GitHub, no solo la estructura del workflow.
+
+| Job | Resultado | Evidencia |
+| --- | --- | --- |
+| Backend - Java 21 | OK / success | Compilación, 10 smoke tests y Checkstyle |
+| Frontend - Node 24 | OK / success | npm ci, lint, 3 tests, tipos y build |
+| Migrations - isolated PostgreSQL 17 | OK / success | 29 tablas + historial, contrato completo de estructura/FK/PK/defaults, repetición, checksum, rollback, recuperación, permisos y JDBC sin migración |
+
+El log Linux reprodujo la causa conocida: Permission denied al crear lock de socket en /var/run/postgresql, dentro del intento de arranque del clúster de prueba. Después arrancó con unix_socket_directories='' únicamente en su PGDATA nuevo; no hubo cambios al directorio global ni al PostgreSQL real. Los cinco checksums coincidieron con los locales. El último mensaje fue `All isolated migration checks passed. Shared PostgreSQL was not contacted.`
+
+Esta actualización solo registra evidencia del código ya comprobado. El informe de entrega identifica también el SHA final publicado y el resultado de su propia ejecución CI. No existen checks fallidos de implementación pendientes en el run citado. LFD-25 está técnicamente preparada para revisión; aprobación/cierre Jira y PR posteriores siguen pendientes del propietario.
