@@ -105,6 +105,8 @@ overrides externos de Spring/Actuator. `VITE_API_BASE_URL` es opcional y públic
 | Rechazo variable sin usar | `npm.cmd run lint` con fixture temporal | OK | TS6133, salida 1 esperada |
 | Rechazo hook inválido | `npm.cmd run lint` con fixture temporal | OK | react-hooks/rules-of-hooks, salida 1 esperada |
 | Sintaxis/estructura CI | `actionlint -shellcheck= .github/workflows/ci.yml` | OK | actionlint v1.7.12, checksum SHA256 del binario verificado; salida 0 |
+| CI real Ubuntu, backend | `sh ./mvnw -B -ntp clean verify` | OK | [Run 38911153011](https://github.com/rialespe/LS_Framework/actions/runs/38911153011), job Backend - Java 21: success |
+| CI real Ubuntu, frontend | `npm ci`, lint, test, typecheck, build | OK | Mismo run, job Frontend - Node 24 y todos sus pasos: success |
 | Bootstrap PostgreSQL aislado | `python scripts/tests/test_postgres_bootstrap.py` | OK | Escenarios nuevo/adopción, rechazo/rollback, permisos, idempotencia y ausencia de contraseña en logs; servidor compartido no utilizado |
 | JDBC positivo sobre servidor compartido | no ejecutado | NO EJECUTADA | No se solicitan ni usan credenciales reales |
 | Comparación visual en navegador | no ejecutada | NO EJECUTADA | App y CSS sin modificaciones; comprobación estructural DOM aprobada |
@@ -128,8 +130,13 @@ ejecutables `.exe`. Se mantiene intacto y documentado para Windows. Portarlo a
 Linux o agregar infraestructura Windows/PG en CI incrementaría el alcance inicial;
 por eso no se añade un tercer job. Su ejecución local aislada sí fue verificada.
 
-Estado GitHub Actions: pendiente del primer push del workflow. No se declara
-éxito remoto a partir de actionlint ni de resultados locales.
+Ejecución real [38911153011](https://github.com/rialespe/LS_Framework/actions/runs/38911153011)
+en el commit `1e66564c54a6b772252cc86d1ea81c00920dbe54`: `completed / success`.
+Ambos jobs y todos sus pasos concluyeron `success`, consultado mediante la API
+GitHub Actions. Este resultado verifica también los comandos POSIX del workflow.
+El commit posterior de documentación vuelve a disparar el mismo CI; su estado
+final se comunica en el informe de entrega para evitar referencias circulares
+al SHA del propio documento. No se abrió Pull Request.
 
 ## Problemas y límites
 
