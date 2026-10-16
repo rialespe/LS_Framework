@@ -1,0 +1,3 @@
+# Isolated technical starts can request an ephemeral port.
+server:
+  port: 0

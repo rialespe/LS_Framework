@@ -1,0 +1,25 @@
+# Build outputs
+**/target/
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+*.log
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/application-local.*
+**/application-*.local.*
+*.pem
+*.key
+*.p12
+*.pfx
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,42 @@
+:root {
+  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+  color: #172b40;
+  background: #f5f7fa;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+.shell { max-width: 1200px; margin: auto; padding: 0 48px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 30px 0; border-bottom: 1px solid #dce3eb; }
+.brand { display: inline-flex; align-items: center; gap: 13px; color: inherit; font-weight: 650; text-decoration: none; }
+.brand-mark { display: grid; place-items: center; width: 42px; height: 42px; background: #172b40; color: white; border-radius: 10px; letter-spacing: -1px; }
+.brand-company, .version { color: #52657a; font-size: 13px; font-weight: 400; }
+.intro { padding: 84px 0 68px; }
+.eyebrow { color: #396c76; font-size: 11px; font-weight: 750; letter-spacing: 2px; margin: 0 0 22px; }
+h1 { font-size: clamp(36px, 5.5vw, 66px); line-height: 1.12; letter-spacing: -2px; font-weight: 650; margin: 0; }
+h1 span { color: #417781; }
+.description { font-size: 18px; line-height: 1.7; color: #52657a; max-width: 560px; margin: 26px 0; }
+.notice { display: inline-flex; align-items: center; gap: 9px; font-size: 12px; padding: 10px 14px; background: #e5edef; border-radius: 30px; color: #315e67; }
+.notice-dot { width: 6px; height: 6px; border-radius: 50%; background: #417781; }
+.foundation { display: grid; grid-template-columns: 1.3fr 1fr; gap: 56px; border: 1px solid #dce3eb; background: white; padding: 32px; border-radius: 14px; }
+.foundation .eyebrow { margin-bottom: 12px; }
+h2 { font-size: 24px; letter-spacing: -.6px; margin: 0 0 14px; }
+.foundation p, .technical p { font-size: 14px; line-height: 1.7; color: #52657a; margin: 0; }
+.technical { border-left: 1px solid #dce3eb; padding-left: 32px; min-width: 0; }
+h3 { font-size: 14px; margin: 0 0 18px; }
+dl { font-size: 12px; margin: 0 0 16px; }
+dt { color: #52657a; margin-bottom: 6px; }
+dd { margin: 0; overflow-wrap: anywhere; }
+footer { display: flex; justify-content: space-between; gap: 16px; padding: 32px 0; margin-top: 40px; color: #52657a; font-size: 11px; }
+a:focus-visible { outline: 3px solid #417781; outline-offset: 6px; }
+@media (max-width: 680px) {
+  .shell { padding: 0 22px; }
+  .header { align-items: flex-start; }
+  .version { text-align: right; }
+  .intro { padding: 56px 0 40px; }
+  .foundation { grid-template-columns: 1fr; gap: 26px; padding: 24px; }
+  .technical { border-left: 0; border-top: 1px solid #dce3eb; padding: 24px 0 0; }
+  footer { flex-direction: column; margin-top: 12px; }
+}
