@@ -1,8 +1,6 @@
 # Migraciones PostgreSQL — LFD-25
 
-**Estado: infraestructura inicial implementada; tablas de dominio pendientes de
-definición. LFD-25 no está lista para cierre.** No se ejecutó nada sobre PostgreSQL
-real. El modelo y las migraciones de tablas no se sustituyen por la prueba de V1.
+**Estado: infraestructura preservada y 29 tablas de dominio implementadas en V2–V5**, conforme al [comentario 10044](https://lssoluciones.atlassian.net/browse/LFD-25?focusedCommentId=10044). Solo se prueban en PostgreSQL 17 desechable. No se ejecutó provisión ni migración en PostgreSQL real; la revisión técnica y el cierre Jira siguen a cargo del propietario.
 
 ## Arquitectura y compatibilidad
 
@@ -32,7 +30,10 @@ SQL versionado en [db/migration](../backend/src/main/resources/db/migration/V1__
 | Versión | Archivo | Responsabilidad implementada |
 | --- | --- | --- |
 | 1 | V1__verify_authorized_schemas.sql | Verificar base, rol, PostgreSQL 17, ocho esquemas y privilegios mínimos |
-| Posteriores | Pendientes, no creadas | Tablas globales, empresariales y de apoyo una vez definido el modelo |
+| 2 | V2__create_identity_and_global_catalogs.sql | 10 tablas de identidad, administración global, catálogo y plantillas |
+| 3 | V3__create_tenants_and_entitlements.sql | 7 tablas de empresas, membresías, administradores y habilitaciones |
+| 4 | V4__create_tenant_security_and_sessions.sql | 7 tablas de roles/perfiles empresariales, sesiones y contextos |
+| 5 | V5__create_integration_audit_and_operations.sql | 5 tablas de API Keys, auditoría y operaciones |
 
 La preparación administrativa crea los ocho namespaces explícitos. V1 comprueba
 ese contrato: no se concede CREATE sobre la base al migrador para crear esquemas
@@ -52,47 +53,32 @@ migración de prueba fallida y preservación de historial. La creación automát
 del historial puede preceder a V1; ante un fallo inspeccionar su estado, no borrarlo.
 Nunca editar scripts ya aplicados ni usar repair/baseline/clean para eludir un error.
 
-## Esquemas y modelo pendiente
+## Esquemas y modelo aprobado
 
-| Esquema | Responsabilidad solicitada | Estado de tablas de dominio |
+El [diccionario físico](database/data-dictionary.md) enumera las **29 tablas**, todas sus columnas, tipos, defaults, nulabilidad, PK, FK simples implementadas y relaciones compuestas pendientes. Incluye el diagrama Mermaid físico.
+
+| Esquema | Responsabilidad | Tablas de dominio |
 | --- | --- | --- |
-| identity | Identidades globales y cuentas | Pendiente de columnas/estados aprobados |
-| platform | Administración y configuración global | Pendiente de estructura de asignaciones globales |
-| tenant | Empresas, sucursales y membresías | Pendiente de diccionario físico y estados de membresía/sucursal |
-| security | Perfiles/roles y referencias de sesiones | Pendiente de alcance global/tenant/sucursal |
-| catalog | Aplicaciones y módulos | Pendiente de columnas y estados |
-| integration | Metadatos de API Keys por tenant | Pendiente de referencias y representación de verificadores |
-| audit | Auditoría global/empresarial | Pendiente de nulabilidad tenant/actor y eventos mínimos |
-| operations | Metadatos operativos | Solo historial Flyway implementado; entidades operativas pendientes |
+| identity | Identidades globales y verificadores de contraseña | 2 |
+| platform | Designación explícita OWNER/SUPERADMIN | 1 |
+| tenant | Empresas, sucursales, membresías y administradores empresariales | 5 |
+| catalog | Catálogo global y habilitaciones empresariales | 4 |
+| security | Permisos/plantillas globales, roles/perfiles empresariales y sesiones | 12 |
+| integration | API Keys con expiración y permisos explícitos | 2 |
+| audit | Evidencia histórica global o empresarial | 1 |
+| operations | Metadatos de mantenimiento y ejecuciones | 2 |
 
-Jira LFD-1/LFD-3/LFD-25 define esos dominios, pero no un diccionario físico con
-columnas y estados para todos ellos. La épica sí define tenants
-`Pendiente → Activo/Suspendido`; eso no define automáticamente los estados de
-usuarios, sucursales, perfiles o membresías. Se solicitó aclaración antes de fijar
-esas decisiones importantes, conforme a la instrucción de detener esa parte si
-existen ambigüedades. No hay tablas de dominio creadas ni un diagrama que simule
-relaciones aún no aprobadas.
+`operations.flyway_schema_history` es una tabla técnica adicional: no cuenta entre las 29. V1 permanece intacta. No hay semillas ni concesiones al runtime.
 
-Definiciones necesarias para continuar:
+Los timestamps técnicos usan CURRENT_TIMESTAMP para la creación y la inicialización de updated_at; no hay trigger y el escritor futuro deberá mantener updated_at. UUID usa gen_random_uuid() nativo, sin extensiones. Estados sin defaults: solo se comprueban los vocabularios aprobados de tenants, habilitaciones y tipos de administrador global. Los demás estados/ciclos funcionales siguen pendientes. users exige username o email no NULL; normalización, blancos y unicidad se reservan a LFD-26.
 
-- Confirmar el diccionario aprobado o autorizar un modelo mínimo concreto.
-- Distinguir roles globales de roles empresariales y si los perfiles pertenecen al
-  tenant o a la sucursal; no elegir tenant_id nullable como solución implícita.
-- Definir estados/nulabilidad de usuarios, membresías, perfiles y sucursales, y
-  el mínimo de sesiones/API Keys/auditoría/operaciones que debe materializar F02.T01.
+LS Soluciones administra permisos/plantillas globales versionadas; cada tenant tendrá copias editables de roles/perfiles por aplicación, sin herencia silenciosa. Se permiten múltiples perfiles por persona/sucursal. La designación empresarial tenant.administrators es independiente del nombre de perfil. No se implementa autorización por insertar registros ni la conservación concurrente de un administrador activo.
 
-Alternativas de alcance pendientes: catálogos globales de roles con asignaciones
-por tenant, frente a definiciones de rol propias de cada tenant; perfiles del
-tenant asignados por sucursal, frente a perfiles definidos por sucursal. Cambian
-las futuras claves y la integridad de LFD-26, por lo que no se decide sin aclaración.
+Las FK simples apuntan a entidades globales inequívocas o a tenant.tenants como raíz empresarial. Referencias a sucursales, membresías, roles, perfiles y API Keys se documentan para FK compuestas futuras; no se reemplazan por referencias simples inseguras. Auditoría conserva identificadores sin FK y sin cascadas. Las FK/globales existentes tampoco validan aún coherencia de aplicación entre módulos/permisos/plantillas.
 
-Una vez resuelto el modelo: UUID nativo `gen_random_uuid()` sin extensiones,
-TIMESTAMPTZ, PK/NOT NULL pertinentes, tenant_id en objetos empresariales,
-created_at/updated_at según entidad y verificadores/hash en lugar de secretos
-en claro. No implementar generación/hash/login ni reglas funcionales. Las FK
-compuestas, unicidad normalizada/códigos/membresías e índices complementarios se
-reservan a LFD-26; semillas y verificaciones ampliadas a LFD-27. Tener tenant_id
-no verifica aislamiento: RLS y filtros/autorización siguen fuera de LFD-25.
+LFD-26: pertenencia tenant/aplicación, claves candidatas y FK compuestas, unicidades normalizadas y empresariales e índices complementarios. LFD-27: semillas de catálogos/permisos/plantillas y pruebas ampliadas. RLS, autenticación, revocación funcional y autorización son posteriores. Tener tenant_id no garantiza aislamiento.
+
+Contrato futuro para tenant suspendido: bloquear escrituras; lecturas sujetas a autorización vigente y políticas del tenant; soporte temporal autorizado solo lectura y auditado. Revocación/suspensión afectarán operaciones posteriores aun con sesión previa. **Este DDL no aplica esas reglas.** La política sobre si OWNER cuenta para mínimos de SUPERADMIN y las garantías transaccionales de administración quedan pendientes.
 
 ## Roles y permisos
 
@@ -108,7 +94,7 @@ no verifica aislamiento: RLS y filtros/autorización siguen fuera de LFD-25.
 | Membresías y herencia de otros roles | No | No |
 | Permisos sobre objetos ajenos | No se amplían | No se conceden |
 
-No se concede DML runtime en tablas futuras todavía. El migrador no ejecuta la
+No se concede USAGE ni DML runtime en las tablas nuevas. Las futuras funciones requerirán concesiones mínimas revisadas por esquema/tabla, excluyendo el historial; no permisos globales. El migrador no ejecuta la
 aplicación. Los esquemas nuevos no conceden permisos a PUBLIC. La herramienta
 de provisión se niega a crear el rol si otras bases permiten CONNECT a PUBLIC:
 NOINHERIT no elimina esos privilegios. La observación LFD-23 de cinco bases
@@ -216,9 +202,7 @@ elimina solo su directorio validado después de detener su propio clúster.
 Para el fixture prepara ACL de postgres/template1 dentro del clúster nuevo; nunca
 reutiliza ni modifica esas bases de la instalación compartida.
 
-Prueba provisión/rechazos, ocho esquemas, historial V1, repetición, checksum
-alterado y rollback de V99 de prueba, permisos y arranque JDBC sin migración.
-**Todavía no prueba tablas de dominio**, porque no están implementadas. El job
+Prueba provisión/rechazos, ocho esquemas, las 29 tablas y cada columna/tipo/nulabilidad/PK/default, historial V1–V5, tablas vacías, checks aprobados, expiración obligatoria de API Keys/credenciales, ausencia de cascadas de auditoría y privilegios PUBLIC/runtime. Verifica repetición sin cambio físico ni de historial, checksum alterado en copia, rollback DDL de V99 y recuperación con scripts originales sin repair. Incluye arranque JDBC HTTP 200/UP sin historial ni migraciones. El job
 CI `migrations` prepara PG17 solo en el runner desechable y ejecuta el mismo
 harness; backend/frontend conservan sus jobs. El resultado real de CI y los
 pendientes se registran en [verificación LFD-25](verification-lfd-25.md).

@@ -29,9 +29,11 @@ no CREATE/TEMP en base, propiedad de base, membresías ni atributos administrati
 El rol aplicativo y su límite de tres conexiones se conservan sin cambios.
 
 Flyway usa `operations.flyway_schema_history` y `createSchemas=false`. V1 verifica
-identidad, PostgreSQL 17, los ocho namespaces y privilegios. Las futuras migraciones
-de tablas se añadirán tras resolver el modelo físico pendiente; no se aprueba ese
-modelo por este ADR. La idempotencia depende del historial y de sus checksums.
+identidad, PostgreSQL 17, los ocho namespaces y privilegios. El diccionario físico
+recibió aprobación separada en el comentario 10044 de LFD-25 y V2–V5 incorporan sus
+29 tablas. Esa aprobación no acepta este ADR ni autoriza provisión/migraciones
+reales; su estado permanece Propuesto. La idempotencia depende del historial y
+de sus checksums.
 Se deshabilita clean y no se automatizan baseline, repair ni out-of-order.
 
 La provisión rechaza roles/esquemas preexistentes, sin adoptarlos o modificarlos.

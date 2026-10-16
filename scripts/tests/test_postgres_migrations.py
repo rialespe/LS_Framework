@@ -24,6 +24,37 @@ ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / 'backend'
 SOURCE = BACKEND / 'src/main/resources/db/migration'
 SCHEMAS = {'identity', 'platform', 'tenant', 'security', 'catalog', 'integration', 'audit', 'operations'}
+MODEL = """identity.users|E|username:text? email:text? email_verified_at:timestamptz? display_name:text status:text
+identity.user_credentials|M:user_id|user_id:uuid password_hash:text must_change_password:boolean password_changed_at:timestamptz password_expires_at:timestamptz failed_attempts:integer locked_until:timestamptz?
+platform.administrators|E|user_id:uuid administrator_kind:text status:text granted_by_user_id:uuid? revoked_by_user_id:uuid? revoked_at:timestamptz?
+catalog.applications|E|code:text name:text description:text? status:text
+catalog.modules|E|application_id:uuid code:text name:text description:text? status:text
+security.permissions|E|application_id:uuid module_id:uuid? code:text name:text description:text? resource_scope:text status:text
+security.role_templates|E|application_id:uuid code:text version:integer name:text description:text? status:text
+security.role_template_permissions|C:role_template_id,permission_id|application_id:uuid role_template_id:uuid permission_id:uuid
+security.profile_templates|E|application_id:uuid code:text version:integer name:text description:text? status:text
+security.profile_template_roles|C:profile_template_id,role_template_id|application_id:uuid profile_template_id:uuid role_template_id:uuid
+tenant.tenants|E|name:text status:text
+tenant.branches|E|tenant_id:uuid code:text name:text status:text
+tenant.memberships|E|tenant_id:uuid user_id:uuid status:text invited_by_user_id:uuid? accepted_at:timestamptz?
+tenant.branch_memberships|E|tenant_id:uuid membership_id:uuid branch_id:uuid status:text
+tenant.administrators|E|tenant_id:uuid membership_id:uuid status:text granted_by_user_id:uuid? granted_at:timestamptz revoked_by_user_id:uuid? revoked_at:timestamptz?
+catalog.tenant_applications|E|tenant_id:uuid application_id:uuid status:text
+catalog.tenant_modules|E|tenant_id:uuid application_id:uuid module_id:uuid status:text
+security.roles|E|tenant_id:uuid application_id:uuid code:text name:text description:text? status:text source_role_template_id:uuid?
+security.role_permissions|C:tenant_id,role_id,permission_id|tenant_id:uuid application_id:uuid role_id:uuid permission_id:uuid
+security.profiles|E|tenant_id:uuid application_id:uuid code:text name:text description:text? status:text source_profile_template_id:uuid?
+security.profile_roles|C:tenant_id,profile_id,role_id|tenant_id:uuid application_id:uuid profile_id:uuid role_id:uuid
+security.branch_profile_assignments|E|tenant_id:uuid application_id:uuid branch_membership_id:uuid profile_id:uuid status:text granted_by_user_id:uuid? revoked_at:timestamptz?
+security.sessions|E|user_id:uuid application_id:uuid token_hash:text expires_at:timestamptz last_seen_at:timestamptz? revoked_at:timestamptz? revoked_by_user_id:uuid?
+security.session_contexts|E|session_id:uuid user_id:uuid application_id:uuid tenant_id:uuid membership_id:uuid branch_id:uuid expires_at:timestamptz? revoked_at:timestamptz?
+integration.api_keys|E|tenant_id:uuid application_id:uuid branch_id:uuid? name:text key_hash:text created_by_user_id:uuid expires_at:timestamptz revoked_at:timestamptz? revoked_by_user_id:uuid?
+integration.api_key_permissions|C:tenant_id,api_key_id,permission_id|tenant_id:uuid application_id:uuid api_key_id:uuid permission_id:uuid
+audit.events|A|occurred_at:timestamptz tenant_id:uuid? application_id:uuid? actor_kind:text actor_user_id:uuid? actor_api_key_id:uuid? session_id:uuid? action_code:text resource_type:text? resource_id:uuid? outcome:text correlation_id:uuid? metadata:jsonb
+operations.maintenance_windows|E|name:text reason:text starts_at:timestamptz ends_at:timestamptz? status:text requested_by_user_id:uuid
+operations.operation_runs|E|operation_type:text status:text requested_by_user_id:uuid? started_at:timestamptz? finished_at:timestamptz? result_code:text? correlation_id:uuid? maintenance_window_id:uuid? artifact_reference:text?"""
+
+
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
@@ -239,6 +270,189 @@ def test_backend_without_migration(cluster):
                   for secret in cluster.secrets.values()), 'no ephemeral credentials in application log')
 
 
+def model_contract():
+    """Independent literal dictionary from approval 10044, never parsed from SQL under test."""
+    tables = {}
+    for line in MODEL.splitlines():
+        table, pattern, fields = line.split('|')
+        kind = pattern[0]
+        columns = {}
+        if kind in 'EA':
+            columns['id'] = ('uuid', False, 'gen_random_uuid()')
+        for field in fields.split():
+            name, data_type = field.split(':')
+            columns[name] = (data_type.rstrip('?'), data_type.endswith('?'), None)
+        columns['created_at'] = ('timestamptz', False, 'CURRENT_TIMESTAMP')
+        if kind in 'EM':
+            columns['updated_at'] = ('timestamptz', False, 'CURRENT_TIMESTAMP')
+        primary = ['id'] if kind in 'EA' else pattern.split(':')[1].split(',')
+        tables[table] = (columns, primary)
+    return tables
+
+
+def schema_snapshot(cluster):
+    return cluster.query("SELECT row_to_json(c)::text FROM (SELECT n.nspname, c.relname, a.attname, "
+                         "a.atttypid, a.attnotnull, pg_get_expr(d.adbin,d.adrelid) AS default_value "
+                         "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                         "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
+                         "LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum "
+                         "WHERE n.nspname IN ('identity','platform','tenant','security','catalog',"
+                         "'integration','audit','operations') AND c.relkind='r' "
+                         "ORDER BY n.nspname,c.relname,a.attnum) c")
+
+
+def test_model_structure(cluster):
+    expected = model_contract()
+    schema_list = ','.join("'" + name + "'" for name in sorted(SCHEMAS))
+    actual = set(cluster.query("SELECT n.nspname||'.'||c.relname FROM pg_class c JOIN pg_namespace n "
+                               "ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname IN ("
+                               + schema_list + ")").splitlines())
+    check(len(expected) == 29 and actual == set(expected) | {'operations.flyway_schema_history'},
+          'exactly 29 approved domain tables plus separate Flyway history; no unexpected tables')
+    type_names = {'timestamptz': 'timestamp with time zone'}
+    for table, (columns, primary) in expected.items():
+        schema, name = table.split('.')
+        data = json.loads(cluster.query(
+            "SELECT json_agg(row_to_json(c)) FROM (SELECT column_name,data_type,is_nullable,column_default "
+            "FROM information_schema.columns WHERE table_schema='" + schema + "' AND table_name='" + name
+            + "' ORDER BY ordinal_position) c"))
+        check([c['column_name'] for c in data] == list(columns), table + ': exact ordered columns')
+        for c in data:
+            typ, nullable, default = columns[c['column_name']]
+            if (c['data_type'], c['is_nullable'], c['column_default']) != (
+                    type_names.get(typ, typ), 'YES' if nullable else 'NO', default):
+                raise AssertionError(table + '.' + c['column_name'] + ': type/nullability/default mismatch')
+        check(True, table + ': all types, nullability and technical defaults match dictionary')
+        keys = cluster.query("SELECT a.attname FROM pg_constraint p CROSS JOIN LATERAL "
+                             "unnest(p.conkey) WITH ORDINALITY k(attnum,position) JOIN pg_attribute a "
+                             "ON a.attrelid=p.conrelid AND a.attnum=k.attnum WHERE p.contype='p' "
+                             "AND p.conrelid='" + table + "'::regclass ORDER BY k.position").splitlines()
+        check(keys == primary, table + ': approved primary key')
+        check(cluster.query('SELECT count(*) FROM ' + table) == '0', table + ': domain table starts empty')
+    global_targets = {
+        'user_id': 'identity.users', 'granted_by_user_id': 'identity.users',
+        'revoked_by_user_id': 'identity.users', 'invited_by_user_id': 'identity.users',
+        'created_by_user_id': 'identity.users', 'requested_by_user_id': 'identity.users',
+        'application_id': 'catalog.applications', 'module_id': 'catalog.modules',
+        'role_template_id': 'security.role_templates', 'permission_id': 'security.permissions',
+        'profile_template_id': 'security.profile_templates', 'source_role_template_id': 'security.role_templates',
+        'source_profile_template_id': 'security.profile_templates', 'tenant_id': 'tenant.tenants',
+        'maintenance_window_id': 'operations.maintenance_windows',
+    }
+    expected_references = {table + '|' + column + '|' + target + '|id|a|a'
+                           for table, (columns, _) in expected.items() if table != 'audit.events'
+                           for column, target in global_targets.items() if column in columns}
+    references = cluster.query(
+        "SELECT ns.nspname||'.'||t.relname||'|'||src.attname||'|'||nd.nspname||'.'||d.relname||'|'||"
+        "dst.attname||'|'||f.confdeltype::text||'|'||f.confupdtype::text FROM pg_constraint f "
+        "JOIN pg_class t ON t.oid=f.conrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace "
+        "JOIN pg_class d ON d.oid=f.confrelid JOIN pg_namespace nd ON nd.oid=d.relnamespace "
+        "JOIN pg_attribute src ON src.attrelid=t.oid AND src.attnum=f.conkey[1] "
+        "JOIN pg_attribute dst ON dst.attrelid=d.oid AND dst.attnum=f.confkey[1] "
+        "WHERE f.contype='f' AND ns.nspname IN (" + schema_list + ")")
+    check(set(references.splitlines()) == expected_references,
+          'exact safe global/root FK targets with NO ACTION; tenant/application composites remain deferred')
+    check(cluster.query("SELECT count(*) FROM pg_trigger g JOIN pg_class c ON c.oid=g.tgrelid "
+                        "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT g.tgisinternal "
+                        "AND n.nspname IN (" + schema_list + ")") == '0',
+          'no generic updated_at or functional business triggers')
+    check(cluster.query("SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid "
+                        "JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname IN (" + schema_list
+                        + ") AND t.relname<>'flyway_schema_history' AND c.contype='c'") == '5',
+          'only identifier presence and four approved vocabulary CHECKs; other lifecycles not frozen')
+    check(cluster.query("SELECT count(*) FROM pg_constraint WHERE contype='f' "
+                        "AND (conrelid='audit.events'::regclass OR confrelid='audit.events'::regclass) "
+                        "AND (confdeltype='c' OR confupdtype='c')") == '0',
+          'audit evidence has no cascading deletes or updates')
+    check(cluster.query("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                        "WHERE n.nspname IN (" + schema_list + ") AND c.relkind='r' AND "
+                        "(pg_get_userbyid(c.relowner)<>'ls_core_migrator_dev' OR c.relrowsecurity)") == '0',
+          'tables/history belong to migrator; no unsupported claim of RLS isolation')
+    check(cluster.query("SELECT count(*) FROM pg_namespace n CROSS JOIN LATERAL "
+                        "aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) a "
+                        "WHERE n.nspname IN (" + schema_list + ") AND a.grantee=0") == '0',
+          'PUBLIC has no privileges on the eight schemas')
+    check(cluster.query("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                        "CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a "
+                        "WHERE n.nspname IN (" + schema_list + ") AND c.relkind='r' AND a.grantee=0") == '0',
+          'PUBLIC has no privileges on new tables/history')
+    check(cluster.query("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                        "WHERE n.nspname IN (" + schema_list + ") AND c.relkind='r' AND "
+                        "has_table_privilege('ls_core_app_dev',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')") == '0',
+          'runtime receives no domain or history table privileges')
+    # Scoped references must not be replaced by unsafe single-column foreign keys.
+    check(cluster.query("SELECT count(*) FROM pg_constraint f JOIN pg_class t ON t.oid=f.confrelid "
+                        "JOIN pg_namespace n ON n.oid=t.relnamespace WHERE f.contype='f' AND "
+                        "((n.nspname='tenant' AND t.relname<>'tenants') OR "
+                        "(n.nspname='security' AND t.relname IN ('roles','profiles','branch_profile_assignments',"
+                        "'session_contexts')) OR n.nspname='integration')") == '0',
+          'tenant-scoped references are deferred instead of unsafe simple FK substitutes')
+    check(cluster.query("SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid "
+                        "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN (" + schema_list
+                        + ") AND c.relname<>'flyway_schema_history' AND NOT i.indisprimary") == '0',
+          'no premature final uniqueness or complementary indexes from LFD-26')
+
+
+def test_model_values(cluster):
+    # Synthetic rows live only in rolled-back transactions, never seeds or persisted secrets.
+    fixtures = ("INSERT INTO identity.users(id,email,display_name,status) VALUES "
+                "('00000000-0000-0000-0000-000000000001','fixture.invalid','Fixture','UNDEFINED');"
+                "INSERT INTO tenant.tenants(id,name,status) VALUES "
+                "('00000000-0000-0000-0000-000000000002','Fixture','PENDING');"
+                "INSERT INTO catalog.applications(id,code,name,status) VALUES "
+                "('00000000-0000-0000-0000-000000000003','fixture','Fixture','UNDEFINED');")
+    uid = "'00000000-0000-0000-0000-000000000001'"
+    tenant = "'00000000-0000-0000-0000-000000000002'"
+    app = "'00000000-0000-0000-0000-000000000003'"
+    module = "'00000000-0000-0000-0000-000000000004'"
+    fixtures += ("INSERT INTO catalog.modules(id,application_id,code,name,status) VALUES ("
+                 + module + "," + app + ",'fixture','Fixture','UNDEFINED');")
+    cases = [
+        ("INSERT INTO tenant.tenants(name,status) VALUES ('Fixture','INVALID')", 'tenant status'),
+        ("INSERT INTO platform.administrators(user_id,administrator_kind,status) VALUES ("
+         + uid + ",'INVALID','UNDEFINED')", 'global administrator kind'),
+        ("INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) VALUES ("
+         + tenant + "," + app + ",'INVALID')", 'application entitlement status'),
+        ("INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) VALUES ("
+         + tenant + "," + app + "," + module + ",'INVALID')", 'module entitlement status'),
+        ("INSERT INTO identity.users(display_name,status) VALUES ('Fixture','UNDEFINED')", 'identifier presence'),
+        ("INSERT INTO integration.api_keys(tenant_id,application_id,name,key_hash,created_by_user_id) VALUES ("
+         + tenant + "," + app + ",'Fixture','non-authenticating-test-verifier'," + uid + ")", 'mandatory API key expiration'),
+        ("INSERT INTO identity.user_credentials(user_id,password_hash,must_change_password,password_changed_at,"
+         "failed_attempts) VALUES (" + uid + ",'non-authenticating-test-verifier',false,CURRENT_TIMESTAMP,0)",
+         'mandatory credential expiration'),
+    ]
+    for sql, label in cases:
+        result = cluster.psql(sql='BEGIN;' + fixtures + sql + ';ROLLBACK;', user='ls_core_migrator_dev')
+        check(result.returncode != 0 and ('violates check constraint' in result.stderr
+              if 'expiration' not in label else 'violates not-null constraint' in result.stderr),
+              'model rejects invalid ' + label)
+    positive = ("INSERT INTO tenant.tenants(name,status) SELECT 'Fixture',v FROM "
+                "(VALUES ('PENDING'),('ACTIVE'),('SUSPENDED')) s(v);"
+                "INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) SELECT "
+                + tenant + "," + app + ",v FROM (VALUES ('ACTIVE'),('READ_ONLY'),('DISABLED')) s(v);"
+                "INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) SELECT "
+                + tenant + "," + app + "," + module + ",v FROM (VALUES ('ACTIVE'),('READ_ONLY'),('DISABLED')) s(v);"
+                "INSERT INTO platform.administrators(user_id,administrator_kind,status) SELECT "
+                + uid + ",v,'UNDEFINED' FROM (VALUES ('OWNER'),('SUPERADMIN')) s(v);"
+                "INSERT INTO integration.api_keys(tenant_id,application_id,name,key_hash,created_by_user_id,expires_at) "
+                "VALUES (" + tenant + "," + app + ",'Fixture','non-authenticating-test-verifier'," + uid
+                + ",CURRENT_TIMESTAMP+INTERVAL '1 hour');"
+                "INSERT INTO identity.user_credentials(user_id,password_hash,must_change_password,password_changed_at,"
+                "password_expires_at,failed_attempts) VALUES (" + uid
+                + ",'non-authenticating-test-verifier',false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP+INTERVAL '1 day',0);"
+                "DO $$ BEGIN IF EXISTS (SELECT FROM identity.users WHERE id=" + uid
+                + " AND (created_at IS NULL OR updated_at IS NULL)) THEN RAISE EXCEPTION 'timestamp default'; END IF;"
+                "IF EXISTS (SELECT FROM tenant.tenants WHERE id IS NULL OR created_at IS NULL OR updated_at IS NULL) "
+                "THEN RAISE EXCEPTION 'UUID/timestamp default'; END IF; END $$;")
+    check(cluster.psql(sql='BEGIN;' + fixtures + positive + 'ROLLBACK;', user='ls_core_migrator_dev').returncode == 0,
+          'native UUID/timestamp defaults, all approved values and verifier-only fixtures work without persisting rows')
+    for table in model_contract():
+        if cluster.query('SELECT count(*) FROM ' + table) != '0':
+            raise AssertionError('Contract test left domain data: ' + table)
+    check(True, 'all 29 domain tables remain empty after rolled-back contract tests')
+
+
 def test_migrations(cluster):
     prepare_fixture(cluster)
     before = cluster.query("SELECT row_to_json(r)::text FROM pg_authid r WHERE rolname='ls_core_app_dev'")
@@ -278,16 +492,23 @@ def test_migrations(cluster):
         print('Flyway failure categories:', [term for term in categories if term.lower() in migrated.stdout.lower()])
         raise AssertionError('Initial isolated Flyway migration failed; diagnostics withheld')
     check('11.14.1' in migrated.stdout, 'Flyway 11.14.1 resolved and executed with Java 21')
-    versions = [path.name.split('__')[0][1:] for path in sorted(SOURCE.glob('V*__*.sql'))]
+    versions = ['1', '2', '3', '4', '5']
     check(cluster.query('SELECT version FROM operations.flyway_schema_history ORDER BY installed_rank').splitlines()
           == versions, 'migration versions recorded in order')
     check(cluster.query('SELECT bool_and(success AND checksum IS NOT NULL) FROM operations.flyway_schema_history') == 't',
           'history has successful migrations and checksums')
     check(cluster.psql(script=inspector).returncode == 0,
           'read-only inspection reports applied versions/checksums after migration')
+    test_model_structure(cluster)
+    test_model_values(cluster)
+    original_schema = schema_snapshot(cluster)
     original_history = history(cluster)
+    for entry in original_history.splitlines():
+        row = json.loads(entry)
+        print(f"Applied migration V{row['version']}: checksum={row['checksum']}, success={row['success']}", flush=True)
     check(cluster.flyway('migrate').returncode == 0 and history(cluster) == original_history,
           'second migrate does not reapply or change history')
+    check(schema_snapshot(cluster) == original_schema, 'second migrate leaves physical schema unchanged')
     check(cluster.flyway('validate').returncode == 0, 'Flyway validates original versions and checksums')
     altered = cluster.root / 'altered-migrations'
     shutil.copytree(SOURCE, altered)
@@ -305,6 +526,9 @@ def test_migrations(cluster):
     check(cluster.flyway('migrate', rollback).returncode != 0, 'invalid future migration fails')
     check(cluster.query("SELECT to_regclass('operations.rollback_probe') IS NULL") == 't'
           and history(cluster) == original_history, 'transaction rollback preserves schema/history on failure')
+    check(cluster.flyway('validate').returncode == 0 and cluster.flyway('migrate').returncode == 0
+          and history(cluster) == original_history and schema_snapshot(cluster) == original_schema,
+          'recovery after failed DDL succeeds without repair, deletion or history changes')
     for role in ['ls_core_app_dev', 'ls_core_migrator_dev']:
         check(cluster.query("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication "
                             "OR rolinherit) AND rolconnlimit=3 FROM pg_roles WHERE rolname='" + role + "'") == 't',
