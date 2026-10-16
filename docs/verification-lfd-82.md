@@ -146,7 +146,13 @@ inline. La revisión manual complementa ortografía, significado y consistencia.
 | Estado local | `git status --short` | OK | Cambios del ticket identificados, sin temporales ni archivos ajenos |
 | Pruebas backend/frontend locales | No repetidas | NO EJECUTADA | Cambio solo documental; las ejecuta CI existente tras push |
 | PostgreSQL real | No ejecutado | NO EJECUTADA | Evidencia del propietario referenciada; ningún acceso DB nuevo |
-| CI LFD-82 al preparar este registro | Consulta GitHub Actions tras push por SHA | NO EJECUTADA | Aún no se ha publicado el commit documental; el informe final registrará URL y jobs del SHA publicado |
+| CI LFD-82 | Consulta GitHub Actions tras push por SHA | OK | [Run 38915475137](https://github.com/rialespe/LS_Framework/actions/runs/38915475137), commit 95200adb056a8cb0e660893e54460d2b55e3606a; completed/success, jobs backend y frontend y todos sus pasos en success |
+
+La ejecución CI anterior comprobó `sh ./mvnw -B -ntp clean verify` en backend y
+`npm ci`, lint, test, typecheck y build en frontend con el workflow existente,
+sin cambios a su configuración. El commit que registra esta evidencia vuelve a
+disparar CI; el informe de entrega identifica su SHA final y su ejecución para
+evitar una referencia circular del documento a su propio commit.
 
 ## Riesgos y pendientes
 
