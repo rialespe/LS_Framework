@@ -1,5 +1,31 @@
 # Evidencia LFD-23
 
+## Seguimiento de aprobación — LFD-82, 2026-10-16
+
+Los apartados originales de abajo preservan los resultados y bloqueos observados
+en cada etapa por Codex. La validación posterior del propietario quedó registrada
+en Jira el 2026-10-16 a las 00:44:57 (America/Santiago),
+[comentario de aprobación 10023](https://lssoluciones.atlassian.net/browse/LFD-23?focusedCommentId=10023).
+LFD-82 consultó ese registro y el estado Listo de LFD-23; no volvió a ejecutar
+operaciones sobre el servidor real ni se atribuye las pruebas del propietario.
+
+| Validación posterior del propietario | Resultado registrado |
+| --- | --- |
+| PostgreSQL local 17.2 | Disponible en 127.0.0.1:5432 |
+| Base y rol | ls_core_dev UTF8, owner postgres; ls_core_app_dev LOGIN, límite 3, sin privilegios administrativos |
+| Conectividad de aplicación | Login y SELECT 1 exitosos; CONNECT true y CREATE/TEMP false en la base objetivo |
+| Idempotencia real | Segunda ejecución NO CHANGES; contraseña preservada y definiciones/ACL de otras bases sin cambios |
+| JDBC / Actuator | Spring Boot 4.0.8 y Java 21, perfil postgres; HTTP 200 y JSON status UP |
+| Límite de permisos | CONNECT efectivo en otras cinco bases, posiblemente por PUBLIC; sin remediaciones ajenas |
+
+La exclusividad de conexión no quedó acreditada: NOINHERIT y el GRANT sobre la base
+objetivo no eliminan acceso efectivo por PUBLIC. No se afirma RLS, aislamiento
+multi-tenant ni aptitud productiva. Véase el [ADR 0002](adr/0002-postgresql-y-conectividad.md).
+
+Los textos «pendiente», «no listo» y «NO EJECUTADA» de abajo pertenecen a sus etapas
+históricas y no deben interpretarse como el estado de cierre actual. Se agregan
+fuentes posteriores sin cambiar fechas ni resultados originales.
+
 ## Corrección de recuperación manual — 2026-10-16
 
 El propietario informó y confirmó por SQL autenticado un rol `ls_core_app_dev`
