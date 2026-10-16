@@ -68,7 +68,7 @@ PostgreSQL 17.2 en clúster nuevo TEMP. Node 24.14.0 y npm 11.12.1 para regresi�
 | Calidad del diff y sintaxis Python | `git diff --check` y `ast.parse` | OK | Sin diagnósticos; no se agregan dependencias Python |
 | A: tablas de dominio | No implementadas | NO EJECUTADA | Pendiente de aclaración de modelo físico |
 | PostgreSQL real | No ejecutado | NO EJECUTADA | Sin conexiones, roles, ACL ni migraciones en 127.0.0.1:5432 |
-| CI del SHA publicado | Consulta posterior al push | NO EJECUTADA | Aún no publicado al preparar este registro; se comunicará URL y resultado por job en la entrega |
+| CI posterior a la corrección Linux | Consulta GitHub Actions | OK | [38945557525](https://github.com/rialespe/LS_Framework/actions/runs/38945557525), SHA 014689d2a726479bcc3904742cef0f0c5b4fcffd: backend, frontend y migraciones en success |
 
 Los fallos negativos del harness son resultados esperados: no se declaran fallos
 del despliegue a partir de sus salidas 1. Contraseñas efímeras se comparan en memoria
@@ -88,6 +88,14 @@ El clúster se detiene antes de eliminar solo el directorio temporal validado.
   deshabilitó el socket Unix únicamente en el PGDATA temporal, para usar solo
   TCP privado sin depender del directorio de sockets del sistema. Se agrega
   diagnóstico de arranque acotado del clúster desechable, sin credenciales.
+  La [ejecución corregida](https://github.com/rialespe/LS_Framework/actions/runs/38945557525)
+  pasó los tres jobs y todo el harness en Linux.
+- Para confirmar la causa y prevenir regresiones, el harness Linux consulta el
+  `unix_socket_directories` de su PGDATA nuevo. Si el directorio no es escribible,
+  reproduce el arranque original y exige el diagnóstico de lock de socket antes
+  de arrancar con `unix_socket_directories=''`. No cambia permisos/directorios
+  del sistema ni utiliza PGDATA existente. El informe de entrega registra el
+  resultado de este diagnóstico y del CI del último commit.
 - El contrato LFD-23 rechaza ACL nuevas no contempladas. Se mantiene intacto y se
   documenta no reutilizar su inicializador como reparación tras ampliar la base.
 - La provisión real probablemente encuentre PUBLIC CONNECT heredado y se detendrá.

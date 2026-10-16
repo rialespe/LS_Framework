@@ -121,6 +121,26 @@ class Cluster:
                         input_text=self.secrets['postgres'] + '\n' + self.secrets['postgres'] + '\n', env=init_env)
         check(init.returncode == 0, 'fresh disposable initdb with SCRAM host authentication')
         if os.name != 'nt':
+            configured = self.run([self.executable('postgres'), '-D', self.data, '-C', 'unix_socket_directories'])
+            check(configured.returncode == 0, 'inspect Unix socket setting of newly initialized cluster')
+            socket_directory = configured.stdout.strip()
+            if socket_directory.startswith('/') and ',' not in socket_directory and not os.access(socket_directory, os.W_OK):
+                # Reproduce the original runner failure without changing system directory permissions.
+                # The process/data directory/port are all ours; the unwritable path prevents socket creation.
+                diagnostic = self.root / 'default-socket.log'
+                original = self.run([self.executable('pg_ctl'), '-D', self.data, '-l', diagnostic,
+                                     '-o', f'-h 127.0.0.1 -p {self.port}', '-w', 'start'], capture=False)
+                startup_log = diagnostic.read_text(encoding='utf-8', errors='replace')
+                check(original.returncode != 0 and 'could not create lock file' in startup_log
+                      and ('Permission denied' in startup_log or 'No such file or directory' in startup_log),
+                      'original startup failure reproduced: system Unix socket lock file cannot be created')
+                check(not any(secret in startup_log for secret in self.secrets.values()),
+                      'socket failure diagnostic contains no ephemeral password')
+                for line in startup_log.splitlines():
+                    if 'FATAL' in line and 'could not create lock file' in line:
+                        print('Confirmed disposable startup cause:', line[:500], flush=True)
+            else:
+                print('INFO: default Unix socket directory is usable; no system-path failure probe needed', flush=True)
             # Debian/Ubuntu binaries default to a system-owned Unix socket directory.
             # This fixture uses only its private TCP endpoint; change only its new PGDATA.
             with (self.data / 'postgresql.conf').open('a', encoding='utf-8') as config:
