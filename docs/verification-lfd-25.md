@@ -83,6 +83,11 @@ El clúster se detiene antes de eliminar solo el directorio temporal validado.
   `--pwprompt` con el fallback de prueba MSYS, sin crear archivos de contraseñas.
 - Flyway PostgreSQL utiliza más de una conexión: el rol migrador se limita a tres,
   sin cambiar el límite del runtime.
+- Primer CI [38945247656](https://github.com/rialespe/LS_Framework/actions/runs/38945247656):
+  backend/frontend aprobaron; migraciones falló al arrancar PG17 en Linux. Se
+  deshabilitó el socket Unix únicamente en el PGDATA temporal, para usar solo
+  TCP privado sin depender del directorio de sockets del sistema. Se agrega
+  diagnóstico de arranque acotado del clúster desechable, sin credenciales.
 - El contrato LFD-23 rechaza ACL nuevas no contempladas. Se mantiene intacto y se
   documenta no reutilizar su inicializador como reparación tras ampliar la base.
 - La provisión real probablemente encuentre PUBLIC CONNECT heredado y se detendrá.

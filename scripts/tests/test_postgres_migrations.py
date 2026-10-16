@@ -120,8 +120,19 @@ class Cluster:
                          '--encoding=UTF8', '--locale=C', '--no-instructions'],
                         input_text=self.secrets['postgres'] + '\n' + self.secrets['postgres'] + '\n', env=init_env)
         check(init.returncode == 0, 'fresh disposable initdb with SCRAM host authentication')
+        if os.name != 'nt':
+            # Debian/Ubuntu binaries default to a system-owned Unix socket directory.
+            # This fixture uses only its private TCP endpoint; change only its new PGDATA.
+            with (self.data / 'postgresql.conf').open('a', encoding='utf-8') as config:
+                config.write("\nunix_socket_directories = ''\n")
         start = self.run([self.executable('pg_ctl'), '-D', self.data, '-l', self.root / 'server.log',
                           '-o', f'-h 127.0.0.1 -p {self.port}', '-w', 'start'], capture=False)
+        if start.returncode:
+            log = (self.root / 'server.log').read_text(encoding='utf-8', errors='replace')
+            if not any(secret in log for secret in self.secrets.values()):
+                for line in log.splitlines():
+                    if any(term in line for term in ['FATAL', 'PANIC', 'ERROR']):
+                        print('Disposable PostgreSQL startup:', line[:500], flush=True)
         check(start.returncode == 0, 'isolated cluster started on non-5432 ephemeral port')
 
     def stop(self):
@@ -252,6 +263,8 @@ def test_migrations(cluster):
           == versions, 'migration versions recorded in order')
     check(cluster.query('SELECT bool_and(success AND checksum IS NOT NULL) FROM operations.flyway_schema_history') == 't',
           'history has successful migrations and checksums')
+    check(cluster.psql(script=inspector).returncode == 0,
+          'read-only inspection reports applied versions/checksums after migration')
     original_history = history(cluster)
     check(cluster.flyway('migrate').returncode == 0 and history(cluster) == original_history,
           'second migrate does not reapply or change history')

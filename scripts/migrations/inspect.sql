@@ -36,4 +36,11 @@ FROM pg_database d
 WHERE d.datname <> current_database() AND d.datallowconn
   AND EXISTS (SELECT FROM aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
               WHERE a.grantee = 0 AND a.privilege_type = 'CONNECT');
+SELECT to_regclass('operations.flyway_schema_history') IS NOT NULL AS has_history \gset
+\if :has_history
+  SELECT version, description, script, checksum, installed_by, success
+  FROM operations.flyway_schema_history ORDER BY installed_rank;
+\else
+  \echo 'No Flyway history exists yet.'
+\endif
 COMMIT;

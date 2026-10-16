@@ -127,6 +127,11 @@ python scripts/manage_migrations.py
 python scripts/manage_migrations.py inspect
 ```
 
+La inspección muestra atributos no sensibles, propietarios de esquemas, el número
+de otras bases con PUBLIC CONNECT y, si existe, versiones/checksums/resultados del
+historial. No imprime contraseñas ni verificadores. Repetirla después de una
+operación autorizada permite revisar el resultado que el wrapper Maven resume.
+
 **Los comandos siguientes son procedimientos preparados, no autorización para
 ejecutarlos ahora.** El propietario debe autorizar específicamente la provisión
 del rol de ámbito clúster y, por separado, la aplicación de migraciones reales.
