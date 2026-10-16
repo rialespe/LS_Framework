@@ -97,8 +97,8 @@ Invoke-RestMethod http://127.0.0.1:8080/actuator/health
 ```
 
 Debe devolver `status: UP`. Finalizar con **Ctrl+C** y esperar
-`Graceful shutdown complete`. `clean verify` compila y empaqueta; todavía
-no hay una suite de pruebas automatizadas. No implica validación funcional.
+`Graceful shutdown complete`. `clean verify` compila, ejecuta las pruebas smoke
+de los perfiles `dev` y `test`, empaqueta y aplica Checkstyle a Java principal y de pruebas.
 
 ## Frontend en Windows PowerShell
 
@@ -217,10 +217,52 @@ de despliegue. No se configura CORS ni proxy: todavía no hay consumo REST desde
 Los resultados concretos y los impedimentos están en
 [verificación de LFD-22](docs/verification-lfd-22.md).
 Este scaffold no proporciona aislamiento tenant ni seguridad funcional y no está
-preparado para exposición productiva. Lint, suite de pruebas y CI corresponden a LFD-24.
+preparado para exposición productiva. LFD-24 incorpora las comprobaciones descritas abajo.
 
 LFD-23 incorpora driver JDBC y pool opcionales, sin entidades, migraciones,
 credenciales versionadas ni contenedores. El servidor local está disponible;
 la ejecución autenticada del inicializador, su segunda ejecución y el resultado
 JDBC positivo siguen pendientes de intervención local segura. No se declaran
 verificados por la sola disponibilidad del servidor ni por las compilaciones.
+
+## Pruebas, lint y CI (LFD-24)
+
+Desde la raíz, con JDK 21, Node 24 y npm 11:
+
+```powershell
+Set-Location backend
+.\mvnw.cmd -B -ntp clean verify
+# Solo estilo Java:
+.\mvnw.cmd -B -ntp checkstyle:check
+Set-Location ../frontend
+npm.cmd ci
+npm.cmd run lint
+npm.cmd run test
+npm.cmd run typecheck
+npm.cmd run build
+```
+
+En POSIX, usar `sh ./mvnw` y `npm` en los mismos directorios.
+Backend: JUnit y Spring Boot Test prueban arranque, ausencia de infraestructura JDBC,
+salud HTTP 200/UP y no exposición de env/beans/configprops en puertos aleatorios.
+Frontend: Vitest, React Testing Library y jsdom prueban identidad, estructura accesible
+y renderizado sin solicitudes al backend. La pantalla conserva su diseño.
+
+ESLint comprueba JavaScript/TSX y reglas React/hooks con parser Babel independiente
+del compilador TypeScript. `lint` incluye `typecheck`: TypeScript 7 estricto comprueba
+tipos, símbolos y variables no utilizadas, evitando instalar typescript-eslint con
+un peer incompatible. `test` termina tras ejecutar las pruebas, sin modo watch.
+
+[CI](.github/workflows/ci.yml) ejecuta jobs independientes backend/frontend en
+Ubuntu 24.04 en push a `feature/**` y PR dirigidos a `main`, con cachés y permisos
+`contents: read`. No requiere variables `LS_DB_*`, secretos ni PostgreSQL.
+Las pruebas de bootstrap PostgreSQL se mantienen locales en Windows:
+
+```powershell
+python scripts/tests/test_postgres_bootstrap.py
+```
+
+Crean clústeres desechables con los binarios PostgreSQL 17, sin usar el servidor
+compartido. No se integran en Linux porque el harness existente fija rutas y
+ejecutables Windows; portarlo excedería el alcance del CI inicial.
+Ver [resultados, compatibilidad y limitaciones de LFD-24](docs/verification-lfd-24.md).
