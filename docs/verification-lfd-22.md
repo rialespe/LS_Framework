@@ -1,5 +1,18 @@
 # Verificación LFD-22
 
+## Seguimiento documental LFD-82 — 2026-10-16
+
+El contenido original de abajo conserva lo observado el 2026-10-15, incluidos
+sus pendientes. No describe el estado actual completo: Jira confirma LFD-22,
+LFD-23 y LFD-24 Listo; PostgreSQL/JDBC se validó posteriormente según
+[seguimiento LFD-23](verification-lfd-23.md), y smoke/lint/CI se incorporaron según
+[LFD-24](verification-lfd-24.md), integrada mediante
+[PR #2](https://github.com/rialespe/LS_Framework/pull/2).
+Esta nota no convierte pruebas antiguas no ejecutadas en pruebas realizadas;
+la comprobación DOM de LFD-24 tampoco equivale a una inspección visual en navegador.
+
+## Evidencia original
+
 Fecha local: 2026-10-15, Windows PowerShell, repositorio inicialmente vacío en
 `main`, sin commits y sin cambios previos. No se hizo commit, push, despliegue
 ni modificación de Jira.

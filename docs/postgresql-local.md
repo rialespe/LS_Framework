@@ -1,6 +1,21 @@
 # PostgreSQL local — LFD-23
 
-## Entorno detectado
+## Estado de desarrollo validado — seguimiento LFD-82, 2026-10-16
+
+El propietario completó LFD-23: PostgreSQL/psql 17.2, `ls_core_dev` UTF8 con
+propietario postgres y `ls_core_app_dev` LOGIN con límite 3 y atributos mínimos.
+Validó conexión de aplicación/SELECT 1, CONNECT verdadero y CREATE/TEMP falsos,
+segunda inicialización `NO CHANGES` y perfil JDBC `postgres` con HTTP 200 y JSON
+`status: UP`. Fuente: [aprobación final, comentario 10023](https://lssoluciones.atlassian.net/browse/LFD-23?focusedCommentId=10023).
+No se repitieron operaciones sobre PostgreSQL real en LFD-82.
+
+La verificación observó CONNECT efectivo en otras cinco bases, posiblemente por
+PUBLIC. No se remediaron permisos ajenos ni se certificó exclusividad de conexión.
+Ver [ADR 0002](adr/0002-postgresql-y-conectividad.md) y
+[seguimiento de evidencia](verification-lfd-23.md). El estado debe inspeccionarse
+de nuevo antes de cualquier futura aplicación del inicializador.
+
+## Entorno detectado originalmente
 
 Windows, PostgreSQL y psql **17.2**, instalados en
 `C:\Program Files\PostgreSQL\17`. Servicio `postgresql-x64-17`, actualmente
@@ -333,7 +348,9 @@ solo el diagnóstico necesario. Nunca copiar archivos privados, logs completos o
 al chat. `.gitignore` excluye .env locales, pgpass, llaves, .dump y .backup.
 No se generaron archivos de secretos ni respaldos.
 
-La evidencia y los bloqueos actuales están en [verificación LFD-23](verification-lfd-23.md).
+La evidencia original y el seguimiento de aprobación posterior están en
+[verificación LFD-23](verification-lfd-23.md). Los bloqueos de acceso de las
+primeras ejecuciones son históricos; no invalidan la aprobación posterior del propietario.
 
 ## Migraciones posteriores
 

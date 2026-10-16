@@ -1,5 +1,22 @@
 # Verificación LFD-24
 
+## Seguimiento de integración — LFD-82, 2026-10-16
+
+La entrega original de abajo precede al PR. Posteriormente el SHA final
+`438332c5d0362cc001af54484b67e0bb89d838ad` pasó
+[CI 38911300657](https://github.com/rialespe/LS_Framework/actions/runs/38911300657),
+con jobs backend/frontend en success. El propietario fusionó el
+[PR #2](https://github.com/rialespe/LS_Framework/pull/2) el 2026-10-16;
+commit de merge `2c52c544ce2923de72de63a5adcd67eb53c8efa0`, base de LFD-82.
+Jira confirma LFD-24 Listo; Git y la API GitHub corroboran integración y CI.
+
+La fila histórica «JDBC positivo sobre servidor compartido: NO EJECUTADA» significa
+que no se repitió en LFD-24, no que siga bloqueada LFD-23. Su aprobación real está
+en el [seguimiento LFD-23](verification-lfd-23.md). No se alteran aquí los
+resultados originales ni se presenta la suite smoke como validación de RLS o producción.
+
+## Evidencia original de la entrega
+
 Fecha: 2026-10-16. Rama: `feature/LFD-24-agregar-pruebas-smoke-lint-y-ci-inicial`.
 Base actualizada de `origin/main`: `576523e20ef43f4813184fda6b183cf8c59666d9`.
 Repositorio limpio antes de crear/publicar la rama, sin rama LFD-24 previa.

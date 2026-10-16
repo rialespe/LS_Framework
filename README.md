@@ -1,8 +1,20 @@
 # LS Core Multi-Tenant v4.0
 
 Base técnica del framework central de administración de LS Soluciones SpA.
-Scaffold **LFD-22** y conectividad JDBC opcional **LFD-23**, de la historia LFD-2 y épica LFD-1.
-El repositorio se encontró vacío; no había convenciones ni código que migrar.
+Scaffold **LFD-22**, conectividad JDBC opcional **LFD-23** y calidad/CI **LFD-24**,
+integrados en `main`, de la historia LFD-2 y épica LFD-1. **LFD-82** completa
+la documentación para revisión; no cierra por sí sola la historia F01.
+
+## Documentación del proyecto
+
+- [Arquitectura y fronteras modulares](docs/architecture/modules.md).
+- [Índice de ADR](docs/adr/README.md): stack, PostgreSQL y calidad/flujo Git.
+- [Guía operativa de Codex](docs/codex/README.md).
+- [Plantilla de prompts por incidencia Jira](docs/codex/prompt-template.md).
+- [PostgreSQL local y credenciales externas](docs/postgresql-local.md).
+- Evidencias fechadas: [LFD-22](docs/verification-lfd-22.md),
+  [LFD-23](docs/verification-lfd-23.md), [LFD-24](docs/verification-lfd-24.md)
+  y [verificación documental LFD-82](docs/verification-lfd-82.md).
 
 ## Alcance actual
 
@@ -64,10 +76,12 @@ frontend/
   package.json, package-lock.json
   tsconfig.json, vite.config.ts, index.html
 docs/architecture/      Fronteras y convenciones para futuras historias
+docs/adr/               Decisiones adoptadas y sus límites
+docs/codex/             Guía operativa y plantilla de prompts
 ```
 
-No se crean directorios vacíos de dominio, rutas ni pruebas. Se incorporarán
-cuando exista una implementación que los justifique. Ver las
+No se crean directorios vacíos de dominio o rutas. Las suites smoke existentes
+están en `backend/src/test/` y junto a App en frontend. Ver las
 [fronteras modulares](docs/architecture/modules.md).
 
 ## Backend en Windows PowerShell
@@ -148,8 +162,8 @@ npm run dev
 ```
 
 Se usa `sh ./mvnw` para no depender del bit ejecutable al crear el repositorio
-desde Windows. Los comandos POSIX se documentan como equivalentes; no se probaron
-en Linux/macOS.
+desde Windows. Los comandos de verificación de backend/frontend se ejecutaron en
+Ubuntu mediante CI de LFD-24; no se verificaron arranques interactivos POSIX ni macOS.
 
 ## PostgreSQL local opcional (LFD-23)
 
@@ -172,6 +186,14 @@ El inicializador inspecciona recursos y requiere confirmación antes de aplicar:
 
 Usa psql -W y \password para introducir credenciales únicamente en el terminal local.
 No modifica servicios Windows, otras bases ni la configuración del servidor.
+
+La aprobación del propietario registrada el 2026-10-16 en
+[LFD-23](https://lssoluciones.atlassian.net/browse/LFD-23?focusedCommentId=10023)
+confirma PostgreSQL 17.2, base `ls_core_dev`, rol `ls_core_app_dev`, conexión de
+aplicación/SELECT 1, segunda inicialización `NO CHANGES` y perfil `postgres` con
+HTTP 200 y JSON `status: UP`. Se observó CONNECT efectivo en otras cinco bases;
+no se modificaron sus permisos y no se garantiza exclusividad de conexión.
+Ver el [ADR 0002](docs/adr/0002-postgresql-y-conectividad.md).
 
 ## Configuración por entorno
 
@@ -214,16 +236,17 @@ de despliegue. No se configura CORS ni proxy: todavía no hay consumo REST desde
 
 ## Verificación y limitaciones
 
-Los resultados concretos y los impedimentos están en
-[verificación de LFD-22](docs/verification-lfd-22.md).
+Los resultados originales y sus seguimientos fechados están en las verificaciones
+de [LFD-22](docs/verification-lfd-22.md), [LFD-23](docs/verification-lfd-23.md)
+y [LFD-24](docs/verification-lfd-24.md).
 Este scaffold no proporciona aislamiento tenant ni seguridad funcional y no está
 preparado para exposición productiva. LFD-24 incorpora las comprobaciones descritas abajo.
 
 LFD-23 incorpora driver JDBC y pool opcionales, sin entidades, migraciones,
-credenciales versionadas ni contenedores. El servidor local está disponible;
-la ejecución autenticada del inicializador, su segunda ejecución y el resultado
-JDBC positivo siguen pendientes de intervención local segura. No se declaran
-verificados por la sola disponibilidad del servidor ni por las compilaciones.
+credenciales versionadas ni contenedores. La validación autenticada del propietario
+está registrada en el seguimiento LFD-23; los intentos antiguos no ejecutados por
+Codex se conservan como evidencia histórica. Esa aprobación local no acredita
+seguridad multi-tenant, RLS, exclusividad de conexión ni preparación productiva.
 
 ## Pruebas, lint y CI (LFD-24)
 
@@ -256,6 +279,9 @@ un peer incompatible. `test` termina tras ejecutar las pruebas, sin modo watch.
 [CI](.github/workflows/ci.yml) ejecuta jobs independientes backend/frontend en
 Ubuntu 24.04 en push a `feature/**` y PR dirigidos a `main`, con cachés y permisos
 `contents: read`. No requiere variables `LS_DB_*`, secretos ni PostgreSQL.
+LFD-24 está integrada mediante [PR #2](https://github.com/rialespe/LS_Framework/pull/2),
+merge `2c52c544ce2923de72de63a5adcd67eb53c8efa0`; el SHA final de su rama pasó
+[CI backend/frontend](https://github.com/rialespe/LS_Framework/actions/runs/38911300657).
 Las pruebas de bootstrap PostgreSQL se mantienen locales en Windows:
 
 ```powershell

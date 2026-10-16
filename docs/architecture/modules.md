@@ -1,14 +1,20 @@
 # Fronteras modulares de LS Core
 
-## Implementado en LFD-22
+## Base implementada en LFD-22/23/24
 
 Monorepo con un único artefacto Spring Boot y una aplicación React independiente.
 La raíz Java escanea `com.lssoluciones.lscore`. No hay submódulos Maven ni
 implementaciones de dominio. Actuator proporciona la única ruta técnica.
+LFD-23 incorpora PostgreSQL/JDBC opcional; LFD-24 incorpora pruebas smoke backend y
+frontend, Checkstyle, ESLint/TypeScript estricto y GitHub Actions con jobs separados.
+Las decisiones y sus límites se registran en los [ADR](../adr/README.md);
+el protocolo del equipo está en la [guía Codex](../codex/README.md).
 
 ## Backend previsto
 
-Los siguientes paquetes se crearán bajo la raíz Java cuando tengan contenido:
+La tabla describe responsabilidades previstas, no módulos de negocio entregados.
+Se crearán paquetes bajo la raíz Java cuando tengan contenido; `operations` ya
+contiene exclusivamente la infraestructura JDBC descrita más abajo:
 
 | Módulo lógico | Responsabilidad futura |
 | --- | --- |
@@ -73,6 +79,8 @@ Los límites locales y la supresión de diagnósticos de conexión se documentan
 
 ## Próximos trabajos
 
-LFD-24: controles de lint,
-verificaciones automatizadas más extensas y CI. RLS, autenticación, entidades,
-permisos, menús dinámicos e integraciones pertenecen a historias posteriores.
+Flyway y migraciones, RLS, identidad/autenticación, autorización, tenants y
+sucursales, entidades, menús dinámicos, integraciones DTE/SII y funcionalidades
+de negocio pertenecen a historias posteriores. La base técnica y su CI ya existen;
+no equivalen a una plataforma productiva ni a aislamiento multi-tenant funcional.
+Ver la [evidencia LFD-24](../verification-lfd-24.md).
