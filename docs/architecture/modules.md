@@ -77,9 +77,19 @@ no intenta crear un DataSource ni buscar una base embebida.
 Los límites locales y la supresión de diagnósticos de conexión se documentan en
 [la guía PostgreSQL](../postgresql-local.md). No constituyen seguridad multi-tenant.
 
+## Infraestructura de migraciones LFD-25 (parcial)
+
+Flyway se ejecuta explícitamente como plugin Maven administrativo, sin bibliotecas
+Flyway en el JAR ni migraciones al arrancar Spring. La preparación administrativa
+propuesta crea los ocho esquemas para el migrador sin conceder database CREATE;
+V1 verifica ese contrato. Las tablas globales/empresariales y sus estados esperan
+aclaración de modelo: esta infraestructura no completa LFD-25.
+Ver [guía](../postgresql-migrations.md), [evidencia](../verification-lfd-25.md) y
+[ADR 0004 Propuesto](../adr/0004-migraciones-administrativas.md).
+
 ## Próximos trabajos
 
-Flyway y migraciones, RLS, identidad/autenticación, autorización, tenants y
+Las migraciones de tablas pendientes, RLS, identidad/autenticación, autorización, tenants y
 sucursales, entidades, menús dinámicos, integraciones DTE/SII y funcionalidades
 de negocio pertenecen a historias posteriores. La base técnica y su CI ya existen;
 no equivalen a una plataforma productiva ni a aislamiento multi-tenant funcional.

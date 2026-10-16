@@ -12,6 +12,8 @@ la documentación para revisión; no cierra por sí sola la historia F01.
 - [Guía operativa de Codex](docs/codex/README.md).
 - [Plantilla de prompts por incidencia Jira](docs/codex/prompt-template.md).
 - [PostgreSQL local y credenciales externas](docs/postgresql-local.md).
+- [Migraciones PostgreSQL LFD-25](docs/postgresql-migrations.md): infraestructura
+  administrativa y [evidencia parcial](docs/verification-lfd-25.md); modelo de tablas pendiente.
 - Evidencias fechadas: [LFD-22](docs/verification-lfd-22.md),
   [LFD-23](docs/verification-lfd-23.md), [LFD-24](docs/verification-lfd-24.md)
   y [verificación documental LFD-82](docs/verification-lfd-82.md).
@@ -23,6 +25,8 @@ configuración inicial y documentación modular. El modo base no depende de Post
 el perfil explícito `postgres` comprueba una conexión real mediante JDBC.
 Solo se expone salud técnica mediante `/actuator/health`, sin detalles ni componentes.
 No existen endpoints de negocio, login, usuarios, tenants, permisos, RLS ni integraciones.
+LFD-25 prepara Flyway como herramienta Maven separada del runtime. La base física
+de dominio aún está pendiente de definición; no se ha migrado PostgreSQL real.
 
 ## Requisitos y versiones
 
