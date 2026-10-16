@@ -58,8 +58,21 @@ Las features no deben importar detalles internos de otras features. La composici
 vive en `app/`; configuración pública no contiene secretos. No se añade router,
 cliente HTTP, estado global, login ni dashboards antes de tener un caso real.
 
-## Fuera de alcance
+## Infraestructura JDBC opcional (LFD-23)
 
-LFD-23: PostgreSQL de desarrollo y configuración segura. LFD-24: controles de lint,
+`operations/infrastructure/jdbc/PostgresConfiguration` existe únicamente bajo
+el perfil `postgres`. Crea un pool Hikari y un indicador Actuator que ejecuta
+`SELECT 1` con cierre de ResultSet, Statement y devolución de Connection al pool.
+El pool se cierra al apagar Spring. No hay repositorios, transacciones de negocio
+ni inicialización SQL. Solo se incorporan HikariCP y pgJDBC, con versiones del BOM
+de Spring Boot: al no incorporar el módulo de autoconfiguración JDBC, el modo base
+no intenta crear un DataSource ni buscar una base embebida.
+
+Los límites locales y la supresión de diagnósticos de conexión se documentan en
+[la guía PostgreSQL](../postgresql-local.md). No constituyen seguridad multi-tenant.
+
+## Próximos trabajos
+
+LFD-24: controles de lint,
 verificaciones automatizadas más extensas y CI. RLS, autenticación, entidades,
 permisos, menús dinámicos e integraciones pertenecen a historias posteriores.

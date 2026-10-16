@@ -1,13 +1,14 @@
 # LS Core Multi-Tenant v4.0
 
 Base técnica del framework central de administración de LS Soluciones SpA.
-Implementación acotada a **LFD-22**, de la historia LFD-2 y épica LFD-1.
+Scaffold **LFD-22** y conectividad JDBC opcional **LFD-23**, de la historia LFD-2 y épica LFD-1.
 El repositorio se encontró vacío; no había convenciones ni código que migrar.
 
 ## Alcance actual
 
 Backend Spring Boot y frontend React independientes, pantalla de identificación,
-configuración inicial y documentación modular. El backend no depende de PostgreSQL.
+configuración inicial y documentación modular. El modo base no depende de PostgreSQL;
+el perfil explícito `postgres` comprueba una conexión real mediante JDBC.
 Solo se expone salud técnica mediante `/actuator/health`, sin detalles ni componentes.
 No existen endpoints de negocio, login, usuarios, tenants, permisos, RLS ni integraciones.
 
@@ -17,6 +18,8 @@ No existen endpoints de negocio, login, usuarios, tenants, permisos, RLS ni inte
 | --- | --- |
 | Java | 21 LTS; verificado con JDK 21.0.10 |
 | Spring Boot | 4.0.8 |
+| PostgreSQL local detectado / cliente psql | 17.2 / 17.2 |
+| pgJDBC / HikariCP | 42.7.13 / 7.0.2; gestionados por Spring Boot |
 | Maven | 3.9.14, descargado por Maven Wrapper 3.3.4 |
 | Node.js | 24 LTS; verificado con 24.14.0; rango admitido `>=24.14.0 <25` |
 | npm | 11.12.1; rango admitido 11.x |
@@ -148,18 +151,40 @@ Se usa `sh ./mvnw` para no depender del bit ejecutable al crear el repositorio
 desde Windows. Los comandos POSIX se documentan como equivalentes; no se probaron
 en Linux/macOS.
 
+## PostgreSQL local opcional (LFD-23)
+
+Ver la [guía de PostgreSQL en Windows/POSIX](docs/postgresql-local.md) y la
+[evidencia LFD-23](docs/verification-lfd-23.md). El arranque anterior sigue siendo
+el modo base; no requiere ninguna variable `LS_DB_*`. Para PostgreSQL, configurar
+las cinco variables obligatorias `LS_DB_HOST`, `LS_DB_PORT`, `LS_DB_NAME`,
+`LS_DB_USERNAME`, `LS_DB_PASSWORD` y activar `postgres` explícitamente.
+
+El script `scripts/Start-PostgresBackend.ps1` solicita la contraseña localmente y
+la transmite solo por entorno de proceso, sin archivos ni argumentos de contraseña.
+El inicializador inspecciona recursos y requiere confirmación antes de aplicar:
+
+```powershell
+.\scripts\Initialize-LocalPostgres.ps1           # Solo inspección y plan
+.\scripts\Initialize-LocalPostgres.ps1 -Apply    # Confirmar escribiendo APPLY
+# Repetir -Apply para comprobar NO CHANGES, sin restablecer contraseñas
+# Añadir -StartBackend para arrancar el perfil postgres con el script existente
+```
+
+Usa psql -W y \password para introducir credenciales únicamente en el terminal local.
+No modifica servicios Windows, otras bases ni la configuración del servidor.
+
 ## Configuración por entorno
 
 | Variable | Valor predeterminado | Uso |
 | --- | --- | --- |
 | `JAVA_HOME` | Depende del equipo | JDK 21 para Wrapper y comandos Java |
-| `SPRING_PROFILES_ACTIVE` | `dev` | Seleccionar `dev`, `test` o `prod` |
+| `SPRING_PROFILES_ACTIVE` | `dev` | Seleccionar `dev`, `test`, `prod` o `postgres` explícito |
 | `SERVER_ADDRESS` | `127.0.0.1` | Interfaz del backend |
 | `SERVER_PORT` | `8080` | Puerto backend; perfil `test` usa `0`, salvo override por variable |
 | `SPRING_CONFIG_ADDITIONAL_LOCATION` | Sin valor | Ubicación externa de configuración Spring opcional |
 | `VITE_API_BASE_URL` | `http://127.0.0.1:8080` | URL pública de API, leída durante dev/build |
 
-No hay variables sensibles obligatorias en LFD-22. Spring Boot **no lee** archivos
+No hay variables sensibles obligatorias en modo base. Spring Boot **no lee** archivos
 `.env` automáticamente: usar variables del proceso o configuración externa.
 Vite permite `.env.local`, `.env.development.local`, `.env.production.local`
 y modos explícitos mediante `--mode`; sus valores `VITE_*` son públicos en el bundle.
@@ -194,5 +219,8 @@ Los resultados concretos y los impedimentos están en
 Este scaffold no proporciona aislamiento tenant ni seguridad funcional y no está
 preparado para exposición productiva. Lint, suite de pruebas y CI corresponden a LFD-24.
 
-LFD-23 podrá añadir PostgreSQL de desarrollo y configuración segura sobre esta
-base. Aquí no hay drivers JDBC, entidades, migraciones, credenciales ni contenedores.
+LFD-23 incorpora driver JDBC y pool opcionales, sin entidades, migraciones,
+credenciales versionadas ni contenedores. El servidor local está disponible;
+la ejecución autenticada del inicializador, su segunda ejecución y el resultado
+JDBC positivo siguen pendientes de intervención local segura. No se declaran
+verificados por la sola disponibilidad del servidor ni por las compilaciones.

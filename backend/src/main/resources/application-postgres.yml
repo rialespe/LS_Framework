@@ -1,0 +1,6 @@
+# Connection fields come exclusively from LS_DB_* process variables / external configuration.
+# Keep third-party connection diagnostics off: failure is reported through health status.
+logging:
+  level:
+    com.zaxxer.hikari: 'OFF'
+    org.postgresql: 'OFF'
