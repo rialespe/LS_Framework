@@ -14,6 +14,10 @@
 *.key
 *.p12
 *.pfx
+*.dump
+*.backup
+pgpass.conf
+.pgpass
 # IDE and OS
 .idea/
 .vscode/
