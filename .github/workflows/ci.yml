@@ -57,3 +57,32 @@ jobs:
       - run: npm run test
       - run: npm run typecheck
       - run: npm run build
+
+  migrations:
+    name: Migrations - isolated PostgreSQL 17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Install PostgreSQL 17 tools in the disposable runner
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-17
+      - name: Build current application for startup regression
+        working-directory: backend
+        run: sh ./mvnw -B -ntp package -DskipTests
+      - name: Flyway history, permissions and JDBC startup on disposable cluster
+        env:
+          LS_PG_BIN: /usr/lib/postgresql/17/bin
+        run: python3 scripts/tests/test_postgres_migrations.py

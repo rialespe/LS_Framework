@@ -72,4 +72,54 @@
       </plugin>
     </plugins>
   </build>
+  <!-- Administrative tooling only: no Flyway library or Boot auto-configuration at runtime. -->
+  <profiles>
+    <profile>
+      <id>database-migrations</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-maven-plugin</artifactId>
+            <version>${flyway.version}</version>
+            <dependencies>
+              <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-database-postgresql</artifactId>
+                <version>${flyway.version}</version>
+              </dependency>
+              <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${postgresql.version}</version>
+              </dependency>
+            </dependencies>
+            <configuration>
+              <locations>
+                <location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+              </locations>
+              <defaultSchema>operations</defaultSchema>
+              <schemas>
+                <schema>identity</schema>
+                <schema>platform</schema>
+                <schema>tenant</schema>
+                <schema>security</schema>
+                <schema>catalog</schema>
+                <schema>integration</schema>
+                <schema>audit</schema>
+                <schema>operations</schema>
+              </schemas>
+              <createSchemas>false</createSchemas>
+              <cleanDisabled>true</cleanDisabled>
+              <baselineOnMigrate>false</baselineOnMigrate>
+              <validateOnMigrate>true</validateOnMigrate>
+              <validateMigrationNaming>true</validateMigrationNaming>
+              <outOfOrder>false</outOfOrder>
+              <placeholderReplacement>false</placeholderReplacement>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

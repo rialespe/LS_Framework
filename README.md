@@ -12,6 +12,8 @@ la documentación para revisión; no cierra por sí sola la historia F01.
 - [Guía operativa de Codex](docs/codex/README.md).
 - [Plantilla de prompts por incidencia Jira](docs/codex/prompt-template.md).
 - [PostgreSQL local y credenciales externas](docs/postgresql-local.md).
+- [Migraciones PostgreSQL LFD-25](docs/postgresql-migrations.md): infraestructura
+  administrativa, [29 tablas de dominio](docs/database/data-dictionary.md) y [evidencia de validación](docs/verification-lfd-25.md).
 - Evidencias fechadas: [LFD-22](docs/verification-lfd-22.md),
   [LFD-23](docs/verification-lfd-23.md), [LFD-24](docs/verification-lfd-24.md)
   y [verificación documental LFD-82](docs/verification-lfd-82.md).
@@ -22,7 +24,10 @@ Backend Spring Boot y frontend React independientes, pantalla de identificación
 configuración inicial y documentación modular. El modo base no depende de PostgreSQL;
 el perfil explícito `postgres` comprueba una conexión real mediante JDBC.
 Solo se expone salud técnica mediante `/actuator/health`, sin detalles ni componentes.
-No existen endpoints de negocio, login, usuarios, tenants, permisos, RLS ni integraciones.
+No existen endpoints de negocio, login, autorización, RLS ni integraciones funcionales.
+LFD-25 incorpora 29 tablas vacías mediante Flyway administrativo separado del runtime.
+El modelo físico no implementa aislamiento ni funcionalidades de usuarios/empresas.
+No se ha migrado PostgreSQL real; las FK compuestas/unicidades y semillas quedan para LFD-26/27.
 
 ## Requisitos y versiones
 
@@ -278,7 +283,9 @@ un peer incompatible. `test` termina tras ejecutar las pruebas, sin modo watch.
 
 [CI](.github/workflows/ci.yml) ejecuta jobs independientes backend/frontend en
 Ubuntu 24.04 en push a `feature/**` y PR dirigidos a `main`, con cachés y permisos
-`contents: read`. No requiere variables `LS_DB_*`, secretos ni PostgreSQL.
+`contents: read`. Backend/frontend no requieren PostgreSQL ni secretos. LFD-25 añade
+un tercer job de migraciones con PostgreSQL 17 desechable y credenciales efímeras,
+sin conectar a servidores externos; ejecuta `python scripts/tests/test_postgres_migrations.py`.
 LFD-24 está integrada mediante [PR #2](https://github.com/rialespe/LS_Framework/pull/2),
 merge `2c52c544ce2923de72de63a5adcd67eb53c8efa0`; el SHA final de su rama pasó
 [CI backend/frontend](https://github.com/rialespe/LS_Framework/actions/runs/38911300657).
