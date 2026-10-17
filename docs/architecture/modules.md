@@ -95,7 +95,9 @@ Ver [guía](../postgresql-migrations.md), [evidencia](../verification-lfd-25.md)
 
 ## Próximos trabajos
 
-Semillas LFD-27, RLS, identidad/autenticación, autorización, funcionalidad empresarial y de
+V8 incorpora las [semillas globales LFD-27](../database/seed-catalog.md), sin habilitaciones ni autorización efectiva.
+F10 desarrollará administración RBAC; F11 habilitaciones y navegación.
+RLS, identidad/autenticación, autorización, funcionalidad empresarial y de
 sucursales, menús dinámicos, integraciones DTE/SII y funcionalidades
 de negocio pertenecen a historias posteriores. La base técnica y su CI ya existen;
 no equivalen a una plataforma productiva ni a aislamiento multi-tenant funcional.

@@ -1,10 +1,10 @@
 # Diccionario físico PostgreSQL 17 — LFD-25
 
-Modelo aprobado en [comentario 10044](https://lssoluciones.atlassian.net/browse/LFD-25?focusedCommentId=10044), 2026-10-16. Tablas implementadas en V2–V5 e integridad reforzada en V6–V7: **29 tablas vacías de dominio**, ocho esquemas. `operations.flyway_schema_history` es adicional y exclusivo de Flyway. No se ejecutó sobre PostgreSQL real.
+Modelo aprobado en [comentario 10044](https://lssoluciones.atlassian.net/browse/LFD-25?focusedCommentId=10044), 2026-10-16. Tablas implementadas en V2–V5 e integridad reforzada en V6–V7: **29 tablas de dominio**, ocho esquemas. V8 incorpora [28 semillas globales aprobadas](seed-catalog.md) en siete tablas; las otras 22 permanecen vacías. `operations.flyway_schema_history` es adicional y exclusivo de Flyway. No se ejecutó sobre PostgreSQL real.
 
 ## Convenciones y límites
 
-E: UUID nativo `gen_random_uuid()`, created_at/updated_at. M: PK explícita y ambos timestamps. C: PK compuesta y created_at. A: UUID y created_at, sin updated_at. Todos los timestamps son TIMESTAMPTZ; CURRENT_TIMESTAMP es un default técnico de creación, también inicializa updated_at. **El escritor futuro debe actualizar updated_at**: no hay triggers. No existen defaults de estados, ENUM, semillas ni deleted_at universal.
+E: UUID nativo `gen_random_uuid()`, created_at/updated_at. M: PK explícita y ambos timestamps. C: PK compuesta y created_at. A: UUID y created_at, sin updated_at. Todos los timestamps son TIMESTAMPTZ; CURRENT_TIMESTAMP es un default técnico de creación, también inicializa updated_at. **El escritor futuro debe actualizar updated_at**: no hay triggers. No existen defaults de estados, ENUM ni deleted_at universal. Las semillas V8 usan UUID explícitos y PUBLISHED como publicación de catálogo, sin conceder acceso efectivo.
 
 Las referencias simples se originaron en V2–V5; diez fueron reemplazadas por FK compuestas en V6, indicadas por la matriz de integridad más abajo. Las restantes se conservan con NO ACTION, sin cascadas. V6 exige pertenencia compuesta empresarial y de aplicación. En auditoría se conservan identificadores sin FK para no condicionar la conservación histórica a la existencia de la entidad. La representación de verificadores no implementa hashing ni impide por sí sola que un escritor indebido guarde un secreto; esos controles son futuros.
 
@@ -725,7 +725,7 @@ EXPLAIN sobre fixtures comprueba elegibilidad de índices de búsqueda por sucur
 
 No se agrega unicidad parcial de administradores globales/empresariales ni de designaciones históricas branch_profile_assignments: status no tiene vocabulario aprobado y revoked_at por sí solo no define toda la vigencia funcional. Hace falta cerrar qué registros históricos y no activos pueden coexistir antes de fijar un predicado. Se permiten múltiples perfiles distintos por sucursal. No se garantiza último administrador activo ni protección concurrente de OWNER.
 
-Las FK garantizan pertenencia de las relaciones listadas y existencia de habilitación, no que tenant, membresía, sesión, permiso, perfil o habilitación esté activo. No bloquean automáticamente lecturas/escrituras por suspensión ni revocación. No hay RLS ni autorización runtime; la integridad referencial no equivale a aislamiento de datos. LFD-27 conserva semillas y verificación ampliada.
+Las FK garantizan pertenencia de las relaciones listadas y existencia de habilitación, no que tenant, membresía, sesión, permiso, perfil o habilitación esté activo. No bloquean automáticamente lecturas/escrituras por suspensión ni revocación. No hay RLS ni autorización runtime; la integridad referencial no equivale a aislamiento de datos. LFD-27 incorpora únicamente semillas globales y verificación ampliada; F10 desarrollará administración RBAC y F11 habilitaciones/navegación.
 
 ### Referencias técnicas y evidencia
 
