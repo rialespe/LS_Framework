@@ -77,7 +77,7 @@ no intenta crear un DataSource ni buscar una base embebida.
 Los límites locales y la supresión de diagnósticos de conexión se documentan en
 [la guía PostgreSQL](../postgresql-local.md). No constituyen seguridad multi-tenant.
 
-## Migraciones y modelo físico LFD-25
+## Migraciones y modelo físico LFD-25/LFD-26
 
 Flyway se ejecuta explícitamente como plugin Maven administrativo, sin bibliotecas
 Flyway en el JAR ni migraciones al arrancar Spring. La preparación administrativa
@@ -86,13 +86,16 @@ V1 verifica ese contrato y se conserva intacta. V2–V5 crean las 29 tablas vac�
 aprobadas en el comentario 10044: globales, empresas, roles/perfiles propios por
 aplicación, asignaciones múltiples por sucursal, sesiones, API Keys, auditoría y
 operaciones. Ver el [diccionario físico](../database/data-dictionary.md). No se
-implementa funcionalidad de dominio Java ni se migra el servidor real.
+implementa funcionalidad de dominio Java ni se migra el servidor real. LFD-26 agrega
+V6–V7: FK compuestas por tenant/aplicación/identidad/sucursal, candidatas,
+unicidad normalizada y apoyo de índices; no RLS ni evaluación de estados activos.
+Ver [evidencia LFD-26](../verification-lfd-26.md).
 Ver [guía](../postgresql-migrations.md), [evidencia](../verification-lfd-25.md) y
 [ADR 0004 Propuesto](../adr/0004-migraciones-administrativas.md).
 
 ## Próximos trabajos
 
-Las restricciones finales y FK compuestas LFD-26, semillas LFD-27, RLS, identidad/autenticación, autorización, funcionalidad empresarial y de
+Semillas LFD-27, RLS, identidad/autenticación, autorización, funcionalidad empresarial y de
 sucursales, menús dinámicos, integraciones DTE/SII y funcionalidades
 de negocio pertenecen a historias posteriores. La base técnica y su CI ya existen;
 no equivalen a una plataforma productiva ni a aislamiento multi-tenant funcional.

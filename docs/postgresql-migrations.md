@@ -1,6 +1,6 @@
-# Migraciones PostgreSQL — LFD-25
+# Migraciones PostgreSQL — LFD-25/LFD-26
 
-**Estado: infraestructura preservada y 29 tablas de dominio implementadas en V2–V5**, conforme al [comentario 10044](https://lssoluciones.atlassian.net/browse/LFD-25?focusedCommentId=10044). Solo se prueban en PostgreSQL 17 desechable. No se ejecutó provisión ni migración en PostgreSQL real; la revisión técnica y el cierre Jira siguen a cargo del propietario.
+**Estado: infraestructura preservada, 29 tablas de dominio V2–V5 e integridad compuesta/unicidad V6–V7**, conforme al [comentario 10044](https://lssoluciones.atlassian.net/browse/LFD-25?focusedCommentId=10044). Solo se prueban en PostgreSQL 17 desechable. No se ejecutó provisión ni migración en PostgreSQL real; la revisión técnica y el cierre Jira siguen a cargo del propietario.
 
 ## Arquitectura y compatibilidad
 
@@ -34,6 +34,8 @@ SQL versionado en [db/migration](../backend/src/main/resources/db/migration/V1__
 | 3 | V3__create_tenants_and_entitlements.sql | 7 tablas de empresas, membresías, administradores y habilitaciones |
 | 4 | V4__create_tenant_security_and_sessions.sql | 7 tablas de roles/perfiles empresariales, sesiones y contextos |
 | 5 | V5__create_integration_audit_and_operations.sql | 5 tablas de API Keys, auditoría y operaciones |
+| 6 | V6__add_composite_referential_integrity.sql | 14 candidatas, 29 FK compuestas y sustitución de diez FK simples |
+| 7 | V7__add_normalized_uniqueness_and_indexes.sql | 11 checks de presencia, 2 UNIQUE naturales, 10 índices únicos normalizados y 18 de apoyo |
 
 La preparación administrativa crea los ocho namespaces explícitos. V1 comprueba
 ese contrato: no se concede CREATE sobre la base al migrador para crear esquemas
@@ -55,7 +57,7 @@ Nunca editar scripts ya aplicados ni usar repair/baseline/clean para eludir un e
 
 ## Esquemas y modelo aprobado
 
-El [diccionario físico](database/data-dictionary.md) enumera las **29 tablas**, todas sus columnas, tipos, defaults, nulabilidad, PK, FK simples implementadas y relaciones compuestas pendientes. Incluye el diagrama Mermaid físico.
+El [diccionario físico](database/data-dictionary.md) enumera las **29 tablas**, todas sus columnas, tipos, defaults, nulabilidad, PK, claves candidatas, FK compuestas, unicidad e índices implementados. Incluye el diagrama Mermaid físico.
 
 | Esquema | Responsabilidad | Tablas de dominio |
 | --- | --- | --- |
@@ -70,13 +72,13 @@ El [diccionario físico](database/data-dictionary.md) enumera las **29 tablas**,
 
 `operations.flyway_schema_history` es una tabla técnica adicional: no cuenta entre las 29. V1 permanece intacta. No hay semillas ni concesiones al runtime.
 
-Los timestamps técnicos usan CURRENT_TIMESTAMP para la creación y la inicialización de updated_at; no hay trigger y el escritor futuro deberá mantener updated_at. UUID usa gen_random_uuid() nativo, sin extensiones. Estados sin defaults: solo se comprueban los vocabularios aprobados de tenants, habilitaciones y tipos de administrador global. Los demás estados/ciclos funcionales siguen pendientes. users exige username o email no NULL; normalización, blancos y unicidad se reservan a LFD-26.
+Los timestamps técnicos usan CURRENT_TIMESTAMP para la creación y la inicialización de updated_at; no hay trigger y el escritor futuro deberá mantener updated_at. UUID usa gen_random_uuid() nativo, sin extensiones. Estados sin defaults: solo se comprueban los vocabularios aprobados de tenants, habilitaciones y tipos de administrador global. Los demás estados/ciclos funcionales siguen pendientes. users exige username o email no NULL; V7 agrega normalización y unicidad de username/correo verificado, rechazo de blanco y unicidades por ámbito.
 
 LS Soluciones administra permisos/plantillas globales versionadas; cada tenant tendrá copias editables de roles/perfiles por aplicación, sin herencia silenciosa. Se permiten múltiples perfiles por persona/sucursal. La designación empresarial tenant.administrators es independiente del nombre de perfil. No se implementa autorización por insertar registros ni la conservación concurrente de un administrador activo.
 
-Las FK simples apuntan a entidades globales inequívocas o a tenant.tenants como raíz empresarial. Referencias a sucursales, membresías, roles, perfiles y API Keys se documentan para FK compuestas futuras; no se reemplazan por referencias simples inseguras. Auditoría conserva identificadores sin FK y sin cascadas. Las FK/globales existentes tampoco validan aún coherencia de aplicación entre módulos/permisos/plantillas.
+Las FK simples apuntan a entidades globales inequívocas o a tenant.tenants como raíz empresarial. V6 exige pertenencia compuesta en sucursales, membresías, roles, perfiles, sesiones/contextos y API Keys. Las diez FK simples directamente sustituidas se retiran tras validar sus referencias compuestas, en una única transacción sin borrar datos. Auditoría conserva identificadores sin FK y sin cascadas. V6 también valida coherencia de aplicación entre módulos, permisos y plantillas.
 
-LFD-26: pertenencia tenant/aplicación, claves candidatas y FK compuestas, unicidades normalizadas y empresariales e índices complementarios. LFD-27: semillas de catálogos/permisos/plantillas y pruebas ampliadas. RLS, autenticación, revocación funcional y autorización son posteriores. Tener tenant_id no garantiza aislamiento.
+LFD-26 implementa pertenencia tenant/aplicación/identidad/acceso, claves candidatas, FK compuestas y unicidades normalizadas/empresariales e índices. No comprueba vigencia funcional ni reemplaza RLS. LFD-27: semillas de catálogos/permisos/plantillas y pruebas ampliadas. RLS, autenticación, revocación funcional y autorización son posteriores. Tener tenant_id no garantiza aislamiento.
 
 Contrato futuro para tenant suspendido: bloquear escrituras; lecturas sujetas a autorización vigente y políticas del tenant; soporte temporal autorizado solo lectura y auditado. Revocación/suspensión afectarán operaciones posteriores aun con sesión previa. **Este DDL no aplica esas reglas.** La política sobre si OWNER cuenta para mínimos de SUPERADMIN y las garantías transaccionales de administración quedan pendientes.
 
@@ -202,7 +204,19 @@ elimina solo su directorio validado después de detener su propio clúster.
 Para el fixture prepara ACL de postgres/template1 dentro del clúster nuevo; nunca
 reutiliza ni modifica esas bases de la instalación compartida.
 
-Prueba provisión/rechazos, ocho esquemas, las 29 tablas y cada columna/tipo/nulabilidad/PK/default, historial V1–V5, tablas vacías, checks aprobados, expiración obligatoria de API Keys/credenciales, ausencia de cascadas de auditoría y privilegios PUBLIC/runtime. Verifica repetición sin cambio físico ni de historial, checksum alterado en copia, rollback DDL de V99 y recuperación con scripts originales sin repair. Incluye arranque JDBC HTTP 200/UP sin historial ni migraciones. El job
+Prueba provisión/rechazos, ocho esquemas, las 29 tablas y cada columna/tipo/nulabilidad/PK/default, historial V1–V7, tablas vacías, checks aprobados, expiración obligatoria de API Keys/credenciales, ausencia de cascadas de auditoría y privilegios PUBLIC/runtime. Verifica repetición sin cambio físico ni de historial, checksum alterado en copia, rollback DDL de V99 y recuperación con scripts originales sin repair. Incluye arranque JDBC HTTP 200/UP sin historial ni migraciones. El job
 CI `migrations` prepara PG17 solo en el runner desechable y ejecuta el mismo
 harness; backend/frontend conservan sus jobs. El resultado real de CI y los
-pendientes se registran en [verificación LFD-25](verification-lfd-25.md).
+pendientes se registran históricamente en [LFD-25](verification-lfd-25.md) y en la continuación [LFD-26](verification-lfd-26.md).
+
+## Continuación LFD-26: aplicación y límites
+
+V1–V5 son inmutables; sus checksums históricos se comprueban en el harness. V6 crea primero candidatas no parciales y después FK, todas MATCH SIMPLE / NO ACTION, inmediatas y validadas. V7 crea reglas de presencia, unicidad e índices. No hay DDL concurrente que impida el rollback transaccional, ni repair/baseline automáticos.
+
+Datos existentes incompatibles provocan fallo cerrado: no se normalizan, deduplican ni corrigen automáticamente. Una ejecución real requerirá autorización y una inspección de datos/ventana de mantenimiento: ALTER TABLE e índices no concurrentes toman locks y su duración crecerá con el volumen. Inspeccionar el historial tras un fallo; restaurar scripts publicados si hay checksum distinto, o preparar una migración nueva aprobada. Nunca editar migraciones aplicadas, borrar bases ni desactivar validaciones para continuar.
+
+Username único global normalizado y correo único solo si está verificado, ambos lower(btrim()). Se permiten duplicados no verificados; la segunda verificación equivalente falla. No hay normalización Unicode ni de proveedores; depende de la collation de la base. Código de sucursal es único por empresa; roles/perfiles por empresa/aplicación. Ver [matriz completa e índices](database/data-dictionary.md).
+
+NULL en module_id/source_template/branch_id omite únicamente su FK opcional MATCH SIMPLE; otras referencias obligatorias permanecen. Las pruebas incluyen UUID no nulo de otro ámbito/inexistente y casos NULL legítimos. La existencia de habilitación no implica estado ACTIVE. Administradores vigentes, historial de designaciones, último administrador, autorización y RLS siguen pendientes de sus definiciones funcionales.
+
+El harness agrega 17 positivos y 81 negativos a sus fixtures válidos, con SQLSTATE 23503/23505/23514 y rollback. Separa expectativas literales en scripts/tests/postgres_integrity_contract.py, sin dependencias nuevas. Para lotes largos usa stdin de psql evitando el límite de argumentos de Windows; no archivos de secretos. Los comandos PowerShell/POSIX y el CI de tres jobs siguen siendo los descritos arriba.
