@@ -121,3 +121,17 @@ No se cierra Jira ni se abre PR. El cierre técnico corresponde a revisión post
 - La ejecución local final comprobó además los nombres exactos de todas las FK y preservación de checksums históricos. Su log termina correctamente; todas las filas sintéticas fueron revertidas.
 
 Las referencias del catálogo por tabla y el diagrama corresponden al estado después de V7, incluyendo los diez reemplazos de FK simples.
+
+## GitHub Actions comprobado
+
+[Run 38988357015](https://github.com/rialespe/LS_Framework/actions/runs/38988357015), commit de implementación **59cc6e5473c5f5903f4c132130158d1e3c4e2318**, completed / success. Se consultaron run/jobs y los logs completos descargados de GitHub; no se infiere éxito de un workflow bien formado.
+
+| Job | Resultado | Evidencia |
+| --- | --- | --- |
+| Backend - Java 21 | OK / success | Compilación, 10 smoke tests y Checkstyle |
+| Frontend - Node 24 | OK / success | Instalación limpia, lint, 3 tests, tipos y build |
+| Migrations - isolated PostgreSQL 17 | OK / success | Nombres/columnas/orden de las 29 FK, 73 índices, 17 positivos/81 negativos, tablas vacías, V1–V7, repetición, checksum, rollback/recuperación, permisos y JDBC sin migrar |
+
+V6 checksum -1148166384 y V7 -1527763311 coincidieron con Windows. El job reprodujo el fallo esperado del socket del sistema en su intento de arranque desechable; luego operó con unix_socket_directories='' solo en su PGDATA nuevo. Terminó con All isolated migration checks passed. Shared PostgreSQL was not contacted. No se cambiaron permisos de directorios globales ni PostgreSQL compartido.
+
+Esta actualización solo registra evidencia de la implementación ya probada. El informe de entrega identifica además el SHA final de la rama y su propio run CI, consultado después de publicar este registro. La implementación está técnicamente preparada para revisión del propietario, con las decisiones funcionales pendientes expresamente indicadas; no se abre PR ni se modifica Jira.
