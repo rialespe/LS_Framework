@@ -6,6 +6,7 @@ There is deliberately no option to supply a server URL, credentials, or an exist
 """
 
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -244,6 +247,78 @@ def history(cluster):
     return cluster.query('SELECT row_to_json(h)::text FROM operations.flyway_schema_history h ORDER BY installed_rank')
 
 
+def wait_for_health(url, is_running, timeout=30):
+    """A listening Tomcat port is not a promise that asynchronous JDBC health is UP yet."""
+    deadline = time.monotonic() + timeout
+    last = 'not ready'
+    while is_running() and time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=min(5, max(0.01, deadline - time.monotonic()))) as response:
+                if response.status == 200 and json.load(response).get('status') == 'UP':
+                    return
+                last = 'HTTP 200 without UP'
+        except urllib.error.HTTPError as failure:
+            failure.close()
+            if failure.code != 503:
+                raise
+            last = 'HTTP 503'
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            last = 'connection not ready'
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.2, remaining))
+    raise AssertionError('JDBC startup did not reach HTTP 200 / UP within the bounded wait: ' + last)
+
+
+def test_health_readiness_wait():
+    """Real loopback HTTP responses prove retries never turn permanent DOWN into a pass."""
+    @contextmanager
+    def endpoint(statuses):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                code = statuses[min(len(requests), len(statuses) - 1)]
+                requests.append(code)
+                body = json.dumps({'status': 'UP' if code == 200 else 'DOWN'}).encode()
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}/actuator/health', requests
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    with endpoint([503, 503, 200]) as (url, requests):
+        wait_for_health(url, lambda: True, timeout=3)
+        check(requests == [503, 503, 200], 'readiness wait tolerates transient 503 only until HTTP 200 / UP')
+    with endpoint([503]) as (url, requests):
+        try:
+            wait_for_health(url, lambda: True, timeout=0.3)
+        except AssertionError as failure:
+            check('HTTP 503' in str(failure), 'readiness wait fails on permanent DOWN at its deadline')
+        else:
+            raise AssertionError('Permanent HTTP 503 was accepted')
+    with endpoint([404]) as (url, requests):
+        try:
+            wait_for_health(url, lambda: True, timeout=3)
+        except urllib.error.HTTPError as failure:
+            check(failure.code == 404 and len(requests) == 1, 'readiness wait does not hide unexpected HTTP errors')
+        else:
+            raise AssertionError('HTTP 404 was accepted')
+
+
 def test_backend_without_migration(cluster):
     jar = BACKEND / 'target/ls-core-0.0.1-SNAPSHOT.jar'
     check(jar.is_file(), 'current backend JAR available (run clean verify first)')
@@ -270,9 +345,8 @@ def test_backend_without_migration(cluster):
                     break
                 time.sleep(0.1)
             check(port is not None and port != 5432, 'postgres profile starts on an ephemeral HTTP port')
-            with urllib.request.urlopen(f'http://127.0.0.1:{port}/actuator/health', timeout=15) as response:
-                check(response.status == 200 and json.load(response)['status'] == 'UP',
-                      'existing application-role JDBC health is HTTP 200 / UP before Flyway')
+            wait_for_health(f'http://127.0.0.1:{port}/actuator/health', lambda: process.poll() is None)
+            check(True, 'existing application-role JDBC health is HTTP 200 / UP before Flyway')
             check(cluster.query("SELECT to_regclass('operations.flyway_schema_history') IS NULL") == 't',
                   'postgres application startup creates no Flyway history or migrations')
         finally:
@@ -582,6 +656,7 @@ def test_migrations(cluster):
 
 
 def main():
+    test_health_readiness_wait()
     with disposable_cluster() as cluster:
         test_migrations(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:

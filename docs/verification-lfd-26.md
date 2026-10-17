@@ -135,3 +135,20 @@ Las referencias del catálogo por tabla y el diagrama corresponden al estado des
 V6 checksum -1148166384 y V7 -1527763311 coincidieron con Windows. El job reprodujo el fallo esperado del socket del sistema en su intento de arranque desechable; luego operó con unix_socket_directories='' solo en su PGDATA nuevo. Terminó con All isolated migration checks passed. Shared PostgreSQL was not contacted. No se cambiaron permisos de directorios globales ni PostgreSQL compartido.
 
 Esta actualización solo registra evidencia de la implementación ya probada. El informe de entrega identifica además el SHA final de la rama y su propio run CI, consultado después de publicar este registro. La implementación está técnicamente preparada para revisión del propietario, con las decisiones funcionales pendientes expresamente indicadas; no se abre PR ni se modifica Jira.
+
+## Seguimiento — respuesta de salud durante el arranque en CI
+
+El [run 38988482578](https://github.com/rialespe/LS_Framework/actions/runs/38988482578), SHA 364d26ead1272593171d653234aefe65bf60944e, terminó con backend/frontend success y migrations failure. Falló ANTES de aplicar Flyway, en la única petición inicial a /actuator/health: HTTP 503 después de detectar Tomcat started. No fue un fallo de constraints, checksum ni arranque PostgreSQL; el socket temporal ya estaba resuelto.
+
+Causa comprobable del fallo del test: equiparaba puerto HTTP escuchando con salud UP inmediata, sin esperar disponibilidad. La implementación Hikari ya usa inicialización asíncrona (initializationFailTimeout=-1); la respuesta pública no expone el componente DOWN y el log no permite atribuirlo a una causa interna JDBC específica. No se afirma que un reintento pruebe por sí solo el origen del DOWN.
+
+Corrección acotada al harness: espera máxima de 30 segundos mientras su proceso Java siga vivo, con peticiones limitadas a cinco segundos o el tiempo restante. Solo tolera 503/conexión aún no disponible y exige finalmente HTTP 200 más JSON status UP. Otros errores HTTP o JSON inválido fallan; DOWN persistente no se convierte en éxito. No se modifican Spring/JDBC/Actuator, migraciones, roles ni workflow.
+
+Pruebas de regresión con servidor HTTP real en loopback/puerto efímero:
+- 503, 503, 200/UP: espera y aprueba.
+- 503 permanente: falla al vencer el plazo.
+- 404: falla sin reintentar.
+
+Estos tres casos se ejecutan al principio del harness en local y CI, además de la suite PostgreSQL completa y sus 17 positivos/81 negativos. La siguiente publicación conserva los checksums V1–V7 y registra la ejecución corregida por SHA en el informe de entrega. El run fallido se conserva como evidencia; no se presenta como aprobado.
+
+Validación local posterior a la corrección: OK, los tres casos HTTP y el harness completo terminaron correctamente, incluidas las 29 tablas, 17 positivos/81 negativos, checksum, rollback, recuperación, permisos y JDBC HTTP 200/UP. Las migraciones V1–V7 fueron comparadas byte a byte contra el commit de implementación y permanecen intactas.
