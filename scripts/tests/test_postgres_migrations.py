@@ -26,6 +26,7 @@ import zipfile
 
 sys.dont_write_bytecode = True
 from postgres_integrity_contract import COMPOSITES, entries, integrity_snapshot, test_integrity_structure, test_integrity_values
+from postgres_seed_contract import manifest, data_snapshot, test_seeds
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -147,13 +148,15 @@ class Cluster:
             raise AssertionError('Isolated SQL assertion failed; diagnostics withheld')
         return result.stdout.strip()
 
-    def flyway(self, goal, location=SOURCE):
+    def flyway(self, goal, location=SOURCE, target=None):
         env = environment()
         env.update(FLYWAY_URL=f'jdbc:postgresql://127.0.0.1:{self.port}/ls_core_dev?connectTimeout=5',
                    FLYWAY_USER='ls_core_migrator_dev', FLYWAY_PASSWORD=self.secrets['ls_core_migrator_dev'])
         command = [str(BACKEND / 'mvnw.cmd')] if os.name == 'nt' else ['sh', str(BACKEND / 'mvnw')]
         command += ['-B', '-ntp', '-f', str(BACKEND / 'pom.xml'), '-Pdatabase-migrations',
                     '-Dflyway.locations=filesystem:' + str(location), 'flyway:' + goal]
+        if target is not None:
+            command.append('-Dflyway.target=' + str(target))
         return self.run(command, env=env, timeout=180)
 
     def start(self):
@@ -319,7 +322,7 @@ def test_health_readiness_wait():
             raise AssertionError('HTTP 404 was accepted')
 
 
-def test_backend_without_migration(cluster):
+def test_backend_without_migration(cluster, expected_history=None):
     jar = BACKEND / 'target/ls-core-0.0.1-SNAPSHOT.jar'
     check(jar.is_file(), 'current backend JAR available (run clean verify first)')
     with zipfile.ZipFile(jar) as archive:
@@ -346,9 +349,12 @@ def test_backend_without_migration(cluster):
                 time.sleep(0.1)
             check(port is not None and port != 5432, 'postgres profile starts on an ephemeral HTTP port')
             wait_for_health(f'http://127.0.0.1:{port}/actuator/health', lambda: process.poll() is None)
-            check(True, 'existing application-role JDBC health is HTTP 200 / UP before Flyway')
-            check(cluster.query("SELECT to_regclass('operations.flyway_schema_history') IS NULL") == 't',
-                  'postgres application startup creates no Flyway history or migrations')
+            check(True, 'existing application-role JDBC health is HTTP 200 / UP')
+            if expected_history is None:
+                check(cluster.query("SELECT to_regclass('operations.flyway_schema_history') IS NULL") == 't',
+                      'postgres application startup creates no Flyway history or migrations')
+            else:
+                check(history(cluster) == expected_history, 'runtime startup leaves V1-V8 Flyway history unchanged')
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -415,7 +421,8 @@ def test_model_structure(cluster):
                              "ON a.attrelid=p.conrelid AND a.attnum=k.attnum WHERE p.contype='p' "
                              "AND p.conrelid='" + table + "'::regclass ORDER BY k.position").splitlines()
         check(keys == primary, table + ': approved primary key')
-        check(cluster.query('SELECT count(*) FROM ' + table) == '0', table + ': domain table starts empty')
+        check(cluster.query('SELECT count(*) FROM ' + table) == str(len(manifest().get(table, ([], []))[1])),
+              table + ': approved seed count or empty domain table')
     global_targets = {
         'user_id': 'identity.users', 'granted_by_user_id': 'identity.users',
         'revoked_by_user_id': 'identity.users', 'invited_by_user_id': 'identity.users',
@@ -535,10 +542,42 @@ def test_model_values(cluster):
                 "THEN RAISE EXCEPTION 'UUID/timestamp default'; END IF; END $$;")
     check(cluster.psql(sql='BEGIN;' + fixtures + positive + 'ROLLBACK;', user='ls_core_migrator_dev').returncode == 0,
           'native UUID/timestamp defaults, all approved values and verifier-only fixtures work without persisting rows')
-    for table in model_contract():
-        if cluster.query('SELECT count(*) FROM ' + table) != '0':
-            raise AssertionError('Contract test left domain data: ' + table)
-    check(True, 'all 29 domain tables remain empty after rolled-back contract tests')
+    test_seeds(cluster, check, model_contract())
+
+
+def test_seed_collisions(cluster):
+    # Exercise the real Flyway V8 transaction against V7, in our new cluster only.
+    check(cluster.flyway('migrate', target='7').returncode == 0, 'LFD-27 collision fixture migrated to V7')
+    old_history = history(cluster)
+    old_schema = schema_snapshot(cluster)
+    fixture_app = "'00000000-0000-0000-0000-000000000027'"
+    app = "'3bc09866-f9f0-573c-82a0-fd72ec6be41f'"
+    profile = "'61e78d0c-1c59-5263-870a-4bc69a9319e6'"
+    cases = [
+        ('incompatible application UUID',
+         "INSERT INTO catalog.applications(id,code,name,status) VALUES (" + app + ",'collision','Fixture','UNDEFINED')",
+         'DELETE FROM catalog.applications WHERE id=' + app),
+        ('normalized application code collision',
+         "INSERT INTO catalog.applications(id,code,name,status) VALUES (" + fixture_app + ",' LS-CORE ','Fixture','UNDEFINED')",
+         'DELETE FROM catalog.applications WHERE id=' + fixture_app),
+        ('late profile UUID collision rolls back earlier V8 inserts',
+         "INSERT INTO catalog.applications(id,code,name,status) VALUES (" + fixture_app + ",'fixture','Fixture','UNDEFINED');"
+         "INSERT INTO security.profile_templates(id,application_id,code,version,name,status) VALUES ("
+         + profile + ',' + fixture_app + ",'fixture',1,'Fixture','UNDEFINED')",
+         'DELETE FROM security.profile_templates WHERE id=' + profile + ';DELETE FROM catalog.applications WHERE id=' + fixture_app),
+    ]
+    for label, setup, cleanup in cases:
+        cluster.query('BEGIN;' + setup + ';COMMIT;', 'ls_core_migrator_dev')
+        before = data_snapshot(cluster, model_contract())
+        failed = cluster.flyway('migrate')
+        check(failed.returncode != 0 and ('23505' in failed.stdout or 'duplicate key' in failed.stdout),
+              'LFD-27 rejects ' + label)
+        check(data_snapshot(cluster, model_contract()) == before and history(cluster) == old_history
+              and schema_snapshot(cluster) == old_schema, 'LFD-27 collision preserves data/schema/V7 history')
+        # Remove only the deliberately inserted fixture, not incompatible real data.
+        cluster.query('BEGIN;' + cleanup + ';COMMIT;', 'ls_core_migrator_dev')
+    check(cluster.flyway('validate', target='7').returncode == 0,
+          'LFD-27: V7 remains valid after collision probes, without repair/baseline')
 
 
 def test_migrations(cluster):
@@ -572,6 +611,7 @@ def test_migrations(cluster):
                                "'ls_core_migrator_dev'").splitlines())
     check(actual == SCHEMAS, 'exactly eight authorized schemas owned by migrator')
     test_backend_without_migration(cluster)
+    test_seed_collisions(cluster)
     migrated = cluster.flyway('migrate')
     if migrated.returncode:
         # Print only known, non-sensitive diagnostic categories, never complete Maven/connection output.
@@ -580,22 +620,25 @@ def test_migrations(cluster):
         print('Flyway failure categories:', [term for term in categories if term.lower() in migrated.stdout.lower()])
         raise AssertionError('Initial isolated Flyway migration failed; diagnostics withheld')
     check('11.14.1' in migrated.stdout, 'Flyway 11.14.1 resolved and executed with Java 21')
-    versions = ['1', '2', '3', '4', '5', '6', '7']
+    versions = ['1', '2', '3', '4', '5', '6', '7', '8']
     check(cluster.query('SELECT version FROM operations.flyway_schema_history ORDER BY installed_rank').splitlines()
           == versions, 'migration versions recorded in order')
     check(cluster.query('SELECT bool_and(success AND checksum IS NOT NULL) FROM operations.flyway_schema_history') == 't',
           'history has successful migrations and checksums')
     check(cluster.psql(script=inspector).returncode == 0,
           'read-only inspection reports applied versions/checksums after migration')
-    old_checksums = {'1': -1378463590, '2': -895708369, '3': -849841087, '4': -1697819596, '5': 1729249324}
+    old_checksums = {'1': -1378463590, '2': -895708369, '3': -849841087, '4': -1697819596,
+                     '5': 1729249324, '6': -1148166384, '7': -1527763311}
     observed = {row['version']: row['checksum'] for row in map(json.loads, history(cluster).splitlines())}
     check(all(observed[v] == checksum for v, checksum in old_checksums.items()),
-          'historical V1-V5 checksums are unchanged')
+          'historical V1-V7 checksums are unchanged')
     test_model_structure(cluster)
+    test_seeds(cluster, check, model_contract())
+    original_data = data_snapshot(cluster, model_contract())
     test_model_values(cluster)
     test_integrity_values(cluster, check)
-    check(all(cluster.query('SELECT count(*) FROM ' + table) == '0' for table in model_contract()),
-          'all 29 domain tables remain empty after LFD-26 fixtures')
+    check(data_snapshot(cluster, model_contract()) == original_data,
+          'LFD-27: all seeds including timestamps preserved after LFD-25/LFD-26 rollback fixtures')
     original_schema = schema_snapshot(cluster)
     original_history = history(cluster)
     for entry in original_history.splitlines():
@@ -604,10 +647,11 @@ def test_migrations(cluster):
     check(cluster.flyway('migrate').returncode == 0 and history(cluster) == original_history,
           'second migrate does not reapply or change history')
     check(schema_snapshot(cluster) == original_schema, 'second migrate leaves physical schema unchanged')
+    check(data_snapshot(cluster, model_contract()) == original_data, 'second migrate leaves all seed data unchanged')
     check(cluster.flyway('validate').returncode == 0, 'Flyway validates original versions and checksums')
     altered = cluster.root / 'altered-migrations'
     shutil.copytree(SOURCE, altered)
-    first = sorted(altered.glob('V*__*.sql'))[0]
+    first = altered / 'V8__seed_approved_global_catalogs.sql'
     first.write_text(first.read_text(encoding='utf-8') + '\nSELECT 25;\n', encoding='utf-8')
     invalid = cluster.flyway('validate', altered)
     check(invalid.returncode != 0 and 'checksum' in invalid.stdout.lower(),
@@ -624,6 +668,7 @@ def test_migrations(cluster):
     check(cluster.flyway('validate').returncode == 0 and cluster.flyway('migrate').returncode == 0
           and history(cluster) == original_history and schema_snapshot(cluster) == original_schema,
           'recovery after failed DDL succeeds without repair, deletion or history changes')
+    check(data_snapshot(cluster, model_contract()) == original_data, 'failed migration and recovery preserve exact seeds')
     for role in ['ls_core_app_dev', 'ls_core_migrator_dev']:
         check(cluster.query("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication "
                             "OR rolinherit) AND rolconnlimit=3 FROM pg_roles WHERE rolname='" + role + "'") == 't',
@@ -652,6 +697,8 @@ def test_migrations(cluster):
     check(cluster.psql(sql='ALTER TABLE fixture_unrelated.sentinel ADD COLUMN forbidden integer',
                        user='ls_core_migrator_dev').returncode != 0, 'migrator cannot alter unrelated objects')
     check(cluster.query('SELECT id FROM fixture_unrelated.sentinel') == '25', 'unrelated sentinel preserved')
+    test_backend_without_migration(cluster, original_history)
+    check(data_snapshot(cluster, model_contract()) == original_data, 'runtime after V8 preserves exact seed snapshot')
     return original_history
 
 

@@ -12,7 +12,7 @@ la documentación para revisión; no cierra por sí sola la historia F01.
 - [Guía operativa de Codex](docs/codex/README.md).
 - [Plantilla de prompts por incidencia Jira](docs/codex/prompt-template.md).
 - [PostgreSQL local y credenciales externas](docs/postgresql-local.md).
-- [Migraciones PostgreSQL LFD-25/LFD-26](docs/postgresql-migrations.md): infraestructura
+- [Migraciones PostgreSQL LFD-25/LFD-26/LFD-27](docs/postgresql-migrations.md): infraestructura
   administrativa, [29 tablas de dominio](docs/database/data-dictionary.md) y [evidencia de validación](docs/verification-lfd-25.md).
 - Evidencias fechadas: [LFD-22](docs/verification-lfd-22.md),
   [LFD-23](docs/verification-lfd-23.md), [LFD-24](docs/verification-lfd-24.md)
@@ -28,7 +28,8 @@ No existen endpoints de negocio, login, autorización, RLS ni integraciones func
 LFD-25 incorpora 29 tablas vacías mediante Flyway administrativo separado del runtime.
 El modelo físico no implementa aislamiento ni funcionalidades de usuarios/empresas.
 LFD-26 agrega FK compuestas e índices de unicidad por ámbito; no sustituye RLS ni autorización.
-No se ha migrado PostgreSQL real. Las semillas quedan para LFD-27.
+LFD-27 agrega V8 con [28 semillas globales aprobadas](docs/database/seed-catalog.md), sin autorización efectiva para tenants.
+No se ha migrado PostgreSQL real. Ver [verificación LFD-27](docs/verification-lfd-27.md).
 Ver [evidencia LFD-26](docs/verification-lfd-26.md).
 
 ## Requisitos y versiones
