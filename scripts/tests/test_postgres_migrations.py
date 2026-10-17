@@ -6,6 +6,7 @@ There is deliberately no option to supply a server URL, credentials, or an exist
 """
 
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
@@ -14,10 +15,17 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
+import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
+
+
+sys.dont_write_bytecode = True
+from postgres_integrity_contract import COMPOSITES, entries, integrity_snapshot, test_integrity_structure, test_integrity_values
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,7 +130,15 @@ class Cluster:
         args = [self.executable('psql'), '-X', '-w', '-h', '127.0.0.1', '-p', str(self.port),
                 '-U', user, '-d', database, '-v', 'ON_ERROR_STOP=1',
                 '-v', 'apply=' + ('true' if apply else 'false'), '-At']
-        args += ['-f', script] if script else ['-c', sql]
+        if script:
+            args += ['-f', script]
+        elif reply is None and len(sql) > 4000:
+            # Large rollback-only SQL fixtures exceed Windows CreateProcess argument limits.
+            # Feed SQL directly over stdin, without files or command-line disclosure.
+            args += ['-f', '-']
+            reply = sql
+        else:
+            args += ['-c', sql]
         return self.run(args, input_text=reply, env=env)
 
     def query(self, sql, user='postgres'):
@@ -231,6 +247,78 @@ def history(cluster):
     return cluster.query('SELECT row_to_json(h)::text FROM operations.flyway_schema_history h ORDER BY installed_rank')
 
 
+def wait_for_health(url, is_running, timeout=30):
+    """A listening Tomcat port is not a promise that asynchronous JDBC health is UP yet."""
+    deadline = time.monotonic() + timeout
+    last = 'not ready'
+    while is_running() and time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=min(5, max(0.01, deadline - time.monotonic()))) as response:
+                if response.status == 200 and json.load(response).get('status') == 'UP':
+                    return
+                last = 'HTTP 200 without UP'
+        except urllib.error.HTTPError as failure:
+            failure.close()
+            if failure.code != 503:
+                raise
+            last = 'HTTP 503'
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            last = 'connection not ready'
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.2, remaining))
+    raise AssertionError('JDBC startup did not reach HTTP 200 / UP within the bounded wait: ' + last)
+
+
+def test_health_readiness_wait():
+    """Real loopback HTTP responses prove retries never turn permanent DOWN into a pass."""
+    @contextmanager
+    def endpoint(statuses):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                code = statuses[min(len(requests), len(statuses) - 1)]
+                requests.append(code)
+                body = json.dumps({'status': 'UP' if code == 200 else 'DOWN'}).encode()
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}/actuator/health', requests
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    with endpoint([503, 503, 200]) as (url, requests):
+        wait_for_health(url, lambda: True, timeout=3)
+        check(requests == [503, 503, 200], 'readiness wait tolerates transient 503 only until HTTP 200 / UP')
+    with endpoint([503]) as (url, requests):
+        try:
+            wait_for_health(url, lambda: True, timeout=0.3)
+        except AssertionError as failure:
+            check('HTTP 503' in str(failure), 'readiness wait fails on permanent DOWN at its deadline')
+        else:
+            raise AssertionError('Permanent HTTP 503 was accepted')
+    with endpoint([404]) as (url, requests):
+        try:
+            wait_for_health(url, lambda: True, timeout=3)
+        except urllib.error.HTTPError as failure:
+            check(failure.code == 404 and len(requests) == 1, 'readiness wait does not hide unexpected HTTP errors')
+        else:
+            raise AssertionError('HTTP 404 was accepted')
+
+
 def test_backend_without_migration(cluster):
     jar = BACKEND / 'target/ls-core-0.0.1-SNAPSHOT.jar'
     check(jar.is_file(), 'current backend JAR available (run clean verify first)')
@@ -257,9 +345,8 @@ def test_backend_without_migration(cluster):
                     break
                 time.sleep(0.1)
             check(port is not None and port != 5432, 'postgres profile starts on an ephemeral HTTP port')
-            with urllib.request.urlopen(f'http://127.0.0.1:{port}/actuator/health', timeout=15) as response:
-                check(response.status == 200 and json.load(response)['status'] == 'UP',
-                      'existing application-role JDBC health is HTTP 200 / UP before Flyway')
+            wait_for_health(f'http://127.0.0.1:{port}/actuator/health', lambda: process.poll() is None)
+            check(True, 'existing application-role JDBC health is HTTP 200 / UP before Flyway')
             check(cluster.query("SELECT to_regclass('operations.flyway_schema_history') IS NULL") == 't',
                   'postgres application startup creates no Flyway history or migrations')
         finally:
@@ -298,7 +385,7 @@ def schema_snapshot(cluster):
                          "LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum "
                          "WHERE n.nspname IN ('identity','platform','tenant','security','catalog',"
                          "'integration','audit','operations') AND c.relkind='r' "
-                         "ORDER BY n.nspname,c.relname,a.attnum) c")
+                         "ORDER BY n.nspname,c.relname,a.attnum) c") + integrity_snapshot(cluster)
 
 
 def test_model_structure(cluster):
@@ -339,27 +426,34 @@ def test_model_structure(cluster):
         'source_profile_template_id': 'security.profile_templates', 'tenant_id': 'tenant.tenants',
         'maintenance_window_id': 'operations.maintenance_windows',
     }
-    expected_references = {table + '|' + column + '|' + target + '|id|a|a'
+    expected_references = {table + '|' + table.split('.')[1] + '_' + column + '_fk|' + column + '|' + target + '|id|a|a'
                            for table, (columns, _) in expected.items() if table != 'audit.events'
                            for column, target in global_targets.items() if column in columns}
+    for table, name, columns, parent, keys, old in entries(COMPOSITES):
+        if old:
+            old_column = old[len(table.split('.')[1]) + 1:-3]
+            expected_references.remove(table + '|' + old + '|' + old_column + '|' + parent + '|id|a|a')
+        expected_references.add(table + '|' + name + '|' + columns + '|' + parent + '|' + keys + '|a|a')
     references = cluster.query(
-        "SELECT ns.nspname||'.'||t.relname||'|'||src.attname||'|'||nd.nspname||'.'||d.relname||'|'||"
-        "dst.attname||'|'||f.confdeltype::text||'|'||f.confupdtype::text FROM pg_constraint f "
+        "SELECT ns.nspname||'.'||t.relname||'|'||f.conname||'|'||array_to_string(ARRAY(SELECT a.attname FROM "
+        "unnest(f.conkey) WITH ORDINALITY k(num,pos) JOIN pg_attribute a ON a.attrelid=t.oid "
+        "AND a.attnum=k.num ORDER BY k.pos),',')||'|'||nd.nspname||'.'||d.relname||'|'||"
+        "array_to_string(ARRAY(SELECT a.attname FROM unnest(f.confkey) WITH ORDINALITY k(num,pos) "
+        "JOIN pg_attribute a ON a.attrelid=d.oid AND a.attnum=k.num ORDER BY k.pos),',')||'|'||"
+        "f.confdeltype::text||'|'||f.confupdtype::text FROM pg_constraint f "
         "JOIN pg_class t ON t.oid=f.conrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace "
         "JOIN pg_class d ON d.oid=f.confrelid JOIN pg_namespace nd ON nd.oid=d.relnamespace "
-        "JOIN pg_attribute src ON src.attrelid=t.oid AND src.attnum=f.conkey[1] "
-        "JOIN pg_attribute dst ON dst.attrelid=d.oid AND dst.attnum=f.confkey[1] "
         "WHERE f.contype='f' AND ns.nspname IN (" + schema_list + ")")
-    check(set(references.splitlines()) == expected_references,
-          'exact safe global/root FK targets with NO ACTION; tenant/application composites remain deferred')
+    check(set(references.splitlines()) == expected_references and len(references.splitlines()) == len(expected_references),
+          'exact FK names and global/root plus 29 composite column orders/targets with NO ACTION')
     check(cluster.query("SELECT count(*) FROM pg_trigger g JOIN pg_class c ON c.oid=g.tgrelid "
                         "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT g.tgisinternal "
                         "AND n.nspname IN (" + schema_list + ")") == '0',
           'no generic updated_at or functional business triggers')
     check(cluster.query("SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid "
                         "JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname IN (" + schema_list
-                        + ") AND t.relname<>'flyway_schema_history' AND c.contype='c'") == '5',
-          'only identifier presence and four approved vocabulary CHECKs; other lifecycles not frozen')
+                        + ") AND t.relname<>'flyway_schema_history' AND c.contype='c'") == '16',
+          '16 CHECKs: original 5 plus 11 presence/coherence rules; other lifecycles not frozen')
     check(cluster.query("SELECT count(*) FROM pg_constraint WHERE contype='f' "
                         "AND (conrelid='audit.events'::regclass OR confrelid='audit.events'::regclass) "
                         "AND (confdeltype='c' OR confupdtype='c')") == '0',
@@ -380,17 +474,7 @@ def test_model_structure(cluster):
                         "WHERE n.nspname IN (" + schema_list + ") AND c.relkind='r' AND "
                         "has_table_privilege('ls_core_app_dev',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')") == '0',
           'runtime receives no domain or history table privileges')
-    # Scoped references must not be replaced by unsafe single-column foreign keys.
-    check(cluster.query("SELECT count(*) FROM pg_constraint f JOIN pg_class t ON t.oid=f.confrelid "
-                        "JOIN pg_namespace n ON n.oid=t.relnamespace WHERE f.contype='f' AND "
-                        "((n.nspname='tenant' AND t.relname<>'tenants') OR "
-                        "(n.nspname='security' AND t.relname IN ('roles','profiles','branch_profile_assignments',"
-                        "'session_contexts')) OR n.nspname='integration')") == '0',
-          'tenant-scoped references are deferred instead of unsafe simple FK substitutes')
-    check(cluster.query("SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid "
-                        "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN (" + schema_list
-                        + ") AND c.relname<>'flyway_schema_history' AND NOT i.indisprimary") == '0',
-          'no premature final uniqueness or complementary indexes from LFD-26')
+    test_integrity_structure(cluster, check, expected)
 
 
 def test_model_values(cluster):
@@ -430,9 +514,13 @@ def test_model_values(cluster):
     positive = ("INSERT INTO tenant.tenants(name,status) SELECT 'Fixture',v FROM "
                 "(VALUES ('PENDING'),('ACTIVE'),('SUSPENDED')) s(v);"
                 "INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) SELECT "
-                + tenant + "," + app + ",v FROM (VALUES ('ACTIVE'),('READ_ONLY'),('DISABLED')) s(v);"
+                + tenant + "," + app + ",'ACTIVE';"
+                "UPDATE catalog.tenant_applications SET status='READ_ONLY';"
+                "UPDATE catalog.tenant_applications SET status='DISABLED';"
                 "INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) SELECT "
-                + tenant + "," + app + "," + module + ",v FROM (VALUES ('ACTIVE'),('READ_ONLY'),('DISABLED')) s(v);"
+                + tenant + "," + app + "," + module + ",'ACTIVE';"
+                "UPDATE catalog.tenant_modules SET status='READ_ONLY';"
+                "UPDATE catalog.tenant_modules SET status='DISABLED';"
                 "INSERT INTO platform.administrators(user_id,administrator_kind,status) SELECT "
                 + uid + ",v,'UNDEFINED' FROM (VALUES ('OWNER'),('SUPERADMIN')) s(v);"
                 "INSERT INTO integration.api_keys(tenant_id,application_id,name,key_hash,created_by_user_id,expires_at) "
@@ -492,15 +580,22 @@ def test_migrations(cluster):
         print('Flyway failure categories:', [term for term in categories if term.lower() in migrated.stdout.lower()])
         raise AssertionError('Initial isolated Flyway migration failed; diagnostics withheld')
     check('11.14.1' in migrated.stdout, 'Flyway 11.14.1 resolved and executed with Java 21')
-    versions = ['1', '2', '3', '4', '5']
+    versions = ['1', '2', '3', '4', '5', '6', '7']
     check(cluster.query('SELECT version FROM operations.flyway_schema_history ORDER BY installed_rank').splitlines()
           == versions, 'migration versions recorded in order')
     check(cluster.query('SELECT bool_and(success AND checksum IS NOT NULL) FROM operations.flyway_schema_history') == 't',
           'history has successful migrations and checksums')
     check(cluster.psql(script=inspector).returncode == 0,
           'read-only inspection reports applied versions/checksums after migration')
+    old_checksums = {'1': -1378463590, '2': -895708369, '3': -849841087, '4': -1697819596, '5': 1729249324}
+    observed = {row['version']: row['checksum'] for row in map(json.loads, history(cluster).splitlines())}
+    check(all(observed[v] == checksum for v, checksum in old_checksums.items()),
+          'historical V1-V5 checksums are unchanged')
     test_model_structure(cluster)
     test_model_values(cluster)
+    test_integrity_values(cluster, check)
+    check(all(cluster.query('SELECT count(*) FROM ' + table) == '0' for table in model_contract()),
+          'all 29 domain tables remain empty after LFD-26 fixtures')
     original_schema = schema_snapshot(cluster)
     original_history = history(cluster)
     for entry in original_history.splitlines():
@@ -561,6 +656,7 @@ def test_migrations(cluster):
 
 
 def main():
+    test_health_readiness_wait()
     with disposable_cluster() as cluster:
         test_migrations(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
