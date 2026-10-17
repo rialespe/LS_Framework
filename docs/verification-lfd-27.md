@@ -73,4 +73,14 @@ PUBLISHED publica definiciones. TENANT y BRANCH expresan el alcance autorizado f
 
 ## CI y revisión técnica
 
-Se publicará únicamente la rama LFD-27. El informe de entrega identificará commits/SHA final y enlace al run con los tres jobs del SHA final terminados. No se presentará un run pendiente como aprobado. Recomendación: revisión técnica de manifiesto, SQL, contrato y evidencia antes de cualquier PR, merge, cierre Jira o aplicación real; estas acciones no están autorizadas en esta etapa.
+Se publicó únicamente la rama LFD-27. Commit de implementación `1c978fc35723be0b2a50ef4c18693994a527c45c`, mensaje `LFD-27: implementar semillas globales aprobadas y contrato aislado`. [Run 38994095648](https://github.com/rialespe/LS_Framework/actions/runs/38994095648): completed / success, head_sha exacto del commit de implementación. Se consultaron el run, los tres jobs y sus logs completos mediante GitHub.
+
+| Job | Resultado | Evidencia de logs |
+| --- | --- | --- |
+| Backend - Java 21 | completed / success | 10 pruebas, 0 fallos/errores/omitidos, 0 violaciones Checkstyle, BUILD SUCCESS |
+| Frontend - Node 24 | completed / success | npm ci, lint, 3 pruebas, tipos y build; 0 vulnerabilidades reportadas |
+| Migrations - isolated PostgreSQL 17 | completed / success | 28 semillas exactas, 29 FK compuestas, 73 índices, 17 positivos/81 negativos, colisiones y rollback, checksum V8 -1947984735, JDBC antes/después; termina sin contactar PostgreSQL compartido |
+
+Los checksums V1–V8 observados en Ubuntu coinciden con Windows. No hubo fallos de CI ni cambios del workflow para esta implementación. Esta actualización documental conserva SQL y harness ya validados; el informe de entrega identifica además el SHA final que incorpora este registro y su propio run, comprobado después del push. El CI de implementación no sustituye esa comprobación final.
+
+Recomendación: preparado para revisión técnica de manifiesto, SQL, contrato y evidencia. PR, merge, cierre Jira y aplicación real quedan fuera de esta autorización. No se abren ni ejecutan esas acciones.
