@@ -1,0 +1,47 @@
+-- Initial lockdown only: no policies or business privileges are granted.
+-- Without policies, RLS denies row access, including DML by the table owner (FORCE).
+-- The seven global catalog tables intentionally retain their existing configuration.
+ALTER TABLE identity.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE identity.users FORCE ROW LEVEL SECURITY;
+ALTER TABLE identity.user_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE identity.user_credentials FORCE ROW LEVEL SECURITY;
+ALTER TABLE platform.administrators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform.administrators FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant.tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant.tenants FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant.branches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant.branches FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant.memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant.memberships FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant.branch_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant.branch_memberships FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant.administrators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant.administrators FORCE ROW LEVEL SECURITY;
+ALTER TABLE catalog.tenant_applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE catalog.tenant_applications FORCE ROW LEVEL SECURITY;
+ALTER TABLE catalog.tenant_modules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE catalog.tenant_modules FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.roles FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.role_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.role_permissions FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.profiles FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.profile_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.profile_roles FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.branch_profile_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.branch_profile_assignments FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE security.session_contexts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.session_contexts FORCE ROW LEVEL SECURITY;
+ALTER TABLE integration.api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE integration.api_keys FORCE ROW LEVEL SECURITY;
+ALTER TABLE integration.api_key_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE integration.api_key_permissions FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit.events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.events FORCE ROW LEVEL SECURITY;
+ALTER TABLE operations.maintenance_windows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operations.maintenance_windows FORCE ROW LEVEL SECURITY;
+ALTER TABLE operations.operation_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operations.operation_runs FORCE ROW LEVEL SECURITY;
