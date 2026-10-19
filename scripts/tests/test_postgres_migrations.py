@@ -148,7 +148,8 @@ class Cluster:
             raise AssertionError('Isolated SQL assertion failed; diagnostics withheld')
         return result.stdout.strip()
 
-    def flyway(self, goal, location=SOURCE, target=None):
+    def flyway(self, goal, location=None, target=None):
+        location = location or getattr(self, 'migration_source', SOURCE)
         env = environment()
         env.update(FLYWAY_URL=f'jdbc:postgresql://127.0.0.1:{self.port}/ls_core_dev?connectTimeout=5',
                    FLYWAY_USER='ls_core_migrator_dev', FLYWAY_PASSWORD=self.secrets['ls_core_migrator_dev'])
@@ -664,7 +665,7 @@ def test_migrations(cluster):
     check(data_snapshot(cluster, model_contract()) == original_data, 'second migrate leaves all seed data unchanged')
     check(cluster.flyway('validate').returncode == 0, 'Flyway validates original versions and checksums')
     altered = cluster.root / 'altered-migrations'
-    shutil.copytree(SOURCE, altered)
+    shutil.copytree(cluster.migration_source, altered)
     first = altered / 'V8__seed_approved_global_catalogs.sql'
     first.write_text(first.read_text(encoding='utf-8') + '\nSELECT 25;\n', encoding='utf-8')
     invalid = cluster.flyway('validate', altered)
@@ -673,7 +674,7 @@ def test_migrations(cluster):
     check(history(cluster) == original_history, 'checksum mismatch changes no history')
     # A future migration that fails after DDL must roll back both the DDL and its history row.
     rollback = cluster.root / 'rollback-migrations'
-    shutil.copytree(SOURCE, rollback)
+    shutil.copytree(cluster.migration_source, rollback)
     (rollback / 'V99__rollback_probe.sql').write_text(
         'CREATE TABLE operations.rollback_probe (id uuid PRIMARY KEY);\nSELECT 1/0;\n', encoding='utf-8')
     check(cluster.flyway('migrate', rollback).returncode != 0, 'invalid future migration fails')
@@ -719,7 +720,14 @@ def test_migrations(cluster):
 def main():
     test_health_readiness_wait()
     with disposable_cluster() as cluster:
+        # Historical DML/integrity regressions require the V8 baseline, before default-deny RLS.
+        cluster.migration_source = cluster.root / 'v8-migrations'
+        cluster.migration_source.mkdir()
+        for migration in SOURCE.glob('V[1-8]__*.sql'):
+            shutil.copy2(migration, cluster.migration_source)
         test_migrations(cluster)
+        from postgres_rls_contract import test_rls
+        test_rls(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
