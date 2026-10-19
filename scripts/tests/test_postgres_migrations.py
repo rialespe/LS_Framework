@@ -246,6 +246,19 @@ def prepare_fixture(cluster):
     cluster.query('ALTER ROLE ls_core_app_dev LOGIN')
 
 
+def test_context_transactions(cluster):
+    """Real JDBC/pool behavior; identity evidence remains explicitly synthetic Java fixtures."""
+    env = environment()
+    env.update(LS_CONTEXT_TEST_ROOT=str(cluster.root), LS_CONTEXT_TEST_PORT=str(cluster.port),
+               LS_CONTEXT_TEST_PASSWORD=cluster.secrets['ls_core_app_dev'])
+    command = [str(BACKEND / 'mvnw.cmd')] if os.name == 'nt' else ['sh', str(BACKEND / 'mvnw')]
+    command += ['-B', '-ntp', '-f', str(BACKEND / 'pom.xml'),
+                '-Dtest=ContextTransactionPostgresTest', 'test']
+    result = cluster.run(command, env=env, timeout=180)
+    check(result.returncode == 0 and 'Tests run: 5, Failures: 0, Errors: 0, Skipped: 0' in result.stdout,
+          'LFD-28: five real JDBC tests on disposable PG17, synthetic identities, limited runtime, no grants')
+
+
 def history(cluster):
     return cluster.query('SELECT row_to_json(h)::text FROM operations.flyway_schema_history h ORDER BY installed_rank')
 
@@ -632,6 +645,7 @@ def test_migrations(cluster):
     observed = {row['version']: row['checksum'] for row in map(json.loads, history(cluster).splitlines())}
     check(all(observed[v] == checksum for v, checksum in old_checksums.items()),
           'historical V1-V7 checksums are unchanged')
+    test_context_transactions(cluster)
     test_model_structure(cluster)
     test_seeds(cluster, check, model_contract())
     original_data = data_snapshot(cluster, model_contract())
