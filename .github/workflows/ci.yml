@@ -31,7 +31,7 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: backend/pom.xml
-      - name: Compile, smoke tests and Checkstyle
+      - name: Compile, context unit tests, smoke tests and Checkstyle
         run: sh ./mvnw -B -ntp clean verify
 
   frontend:
@@ -82,7 +82,7 @@ jobs:
       - name: Build current application for startup regression
         working-directory: backend
         run: sh ./mvnw -B -ntp package -DskipTests
-      - name: Flyway history, permissions and JDBC startup on disposable cluster
+      - name: Flyway, permissions, LFD-28 context transactions and JDBC startup on disposable cluster
         env:
           LS_PG_BIN: /usr/lib/postgresql/17/bin
         run: python3 scripts/tests/test_postgres_migrations.py

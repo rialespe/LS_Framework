@@ -18,6 +18,8 @@ la documentación para revisión; no cierra por sí sola la historia F01.
   [LFD-23](docs/verification-lfd-23.md), [LFD-24](docs/verification-lfd-24.md)
   y [verificación documental LFD-82](docs/verification-lfd-82.md).
 
+- [Contexto transaccional LFD-28](docs/multi-tenant-context.md) y [verificación](docs/verification-lfd-28.md): contratos inactivos y pruebas sintéticas/JDBC aislado.
+
 ## Alcance actual
 
 Backend Spring Boot y frontend React independientes, pantalla de identificación,

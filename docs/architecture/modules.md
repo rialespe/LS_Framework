@@ -69,8 +69,8 @@ cliente HTTP, estado global, login ni dashboards antes de tener un caso real.
 `operations/infrastructure/jdbc/PostgresConfiguration` existe únicamente bajo
 el perfil `postgres`. Crea un pool Hikari y un indicador Actuator que ejecuta
 `SELECT 1` con cierre de ResultSet, Statement y devolución de Connection al pool.
-El pool se cierra al apagar Spring. No hay repositorios, transacciones de negocio
-ni inicialización SQL. Solo se incorporan HikariCP y pgJDBC, con versiones del BOM
+El pool se cierra al apagar Spring. No hay repositorios ni inicialización SQL empresarial. LFD-28 agrega un ejecutor
+transaccional explícito e inactivo, descrito más abajo. Solo se incorporan HikariCP y pgJDBC, con versiones del BOM
 de Spring Boot: al no incorporar el módulo de autoconfiguración JDBC, el modo base
 no intenta crear un DataSource ni buscar una base embebida.
 
@@ -102,3 +102,15 @@ sucursales, menús dinámicos, integraciones DTE/SII y funcionalidades
 de negocio pertenecen a historias posteriores. La base técnica y su CI ya existen;
 no equivalen a una plataforma productiva ni a aislamiento multi-tenant funcional.
 Ver la [evidencia LFD-24](../verification-lfd-24.md).
+
+## Infraestructura de contexto transaccional LFD-28
+
+`access/application/context` contiene el puerto TrustedContextSource, ContextResolver y su
+AuthorizedContext de constructor privado, más el rechazo seguro ContextRejectedException.
+`operations/infrastructure/jdbc/ContextTransaction` depende de ese contrato de aplicación,
+HikariCP y JDBC. No existe dependencia inversa desde access a infraestructura ni endpoints,
+beans o adaptadores nuevos. Los dobles de identidad existen exclusivamente en src/test.
+La infraestructura está preparada para composición futura y no autentica usuarios/API Keys.
+Ver [contratos, ciclo JDBC y matriz RLS propuesta](../multi-tenant-context.md) y
+[evidencia y límites LFD-28](../verification-lfd-28.md). F04/F05/F16, permisos efectivos,
+privilegios SQL, LFD-29 y LFD-30 siguen pendientes según sus respectivos alcances.
