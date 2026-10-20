@@ -1,5 +1,6 @@
-export type IconName = 'grid' | 'company' | 'branch' | 'users' | 'apps' | 'arrow' | 'search' | 'menu' | 'close' | 'key' | 'clock'
+export type IconName = 'grid' | 'company' | 'branch' | 'users' | 'apps' | 'arrow' | 'search' | 'menu' | 'close' | 'key' | 'clock' | 'device'
 const paths: Record<IconName, string> = {
+  device: 'M3 3h18v13H3z M8 21h8 M12 16v5',
   key: 'M15 3a6 6 0 0 0-5.5 8.4L3 18v3h3v-3h3v-3l3.6-3.6A6 6 0 1 0 15 3z M17 7h.01',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',

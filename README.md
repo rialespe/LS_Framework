@@ -144,7 +144,13 @@ y sesión expirada. No requiere backend ni configurar `.env.local`: los campos
 de credenciales y las acciones de envío están deshabilitados. La advertencia de
 demostración permanece visible al desplazarse y los controles solo cambian vistas.
 No hay autenticación, solicitudes de recuperación ni cambios de contraseña.
-Este incremento visual mantiene **F12 y LFD-56 en Backlog** y no completa
+Las secciones **Contexto (demo)** y **Sesiones (demo)** amplían esta previsualización:
+el selector reutiliza empresas y sucursales ficticias, limpia la sucursal al cambiar
+de empresa y descarta su selección al salir. No establece permisos ni modifica otras
+pantallas. Los dispositivos, estados y fechas son ficticios y sus acciones están
+deshabilitadas. No hay solicitudes de red, cookies ni almacenamiento de contexto.
+
+Estos incrementos visuales mantienen **F12, LFD-56 y LFD-57 en Backlog** y no completan
 precondiciones de F03–F11. La aprobación técnica y visual sigue pendiente.
 Para detener Vite, usar **Ctrl+C**; si Windows pregunta por el trabajo por lotes,
 responder `S`.
