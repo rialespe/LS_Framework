@@ -177,3 +177,64 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
 .topbar :is(a, button):focus-visible { outline-color: var(--brand-cyan); }
 .workspace-dot { background: var(--brand-cyan); }
 .hero { background: radial-gradient(ellipse at 85% 15%, var(--brand-electric), transparent 68%), var(--navy-surface); }
+
+/* Access preview: navigation only. Disabled fields never accept credentials. */
+.access-switcher { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 20px; }
+.access-switcher > span { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: var(--text-muted); margin-right: 12px; }
+.access-switcher button { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: 13px; font-weight: 600; }
+.access-switcher button > span { font-size: 11px; color: var(--text-muted); }
+.access-switcher button[aria-pressed=true] { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+.access-switcher button:hover { border-color: var(--primary); }
+.access-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: 0 16px 48px color-mix(in srgb, var(--brand-navy) 5%, transparent); }
+.access-story { display: flex; flex-direction: column; align-items: flex-start; position: relative; padding: clamp(28px, 4vw, 58px); color: var(--on-dark); background: radial-gradient(ellipse at 0 0, var(--brand-blue), transparent 65%), radial-gradient(ellipse at 100% 100%, color-mix(in srgb, var(--brand-violet) 40%, transparent), transparent 65%), var(--navy-surface); }
+.access-edition { font-size: 12px; font-weight: 650; letter-spacing: 2px; }
+.access-edition > span { color: var(--brand-cyan); margin-inline: 9px; }
+.access-symbol { display: grid; place-items: center; width: 88px; height: 88px; margin: 55px 0 32px; color: var(--brand-cyan); border: 1px solid var(--on-dark-border); border-radius: 24px; background: color-mix(in srgb, var(--brand-cyan) 7%, transparent); box-shadow: 0 0 0 12px color-mix(in srgb, var(--brand-cyan) 3%, transparent); }
+.access-story h2 { font-size: clamp(29px, 3vw, 41px); line-height: 1.2; letter-spacing: -1.1px; font-weight: 550; margin: 16px 0 20px; }
+.access-story h2 > span { color: var(--brand-cyan); }
+.access-story > p:not(.hero-kicker) { font-size: 15px; color: var(--on-dark-muted); max-width: 345px; line-height: 1.8; }
+.access-story-note { display: flex; gap: 15px; margin-top: 40px; border-top: 1px solid var(--on-dark-border); padding-top: 26px; }
+.access-story-note > span { color: var(--brand-cyan); font-size: 28px; }
+.access-story-note strong { font-size: 14px; font-weight: 600; }
+.access-story-note p { color: var(--on-dark-muted); font-size: 13px; line-height: 1.8; margin-top: 7px; }
+.access-story-foot { color: var(--on-dark-muted); font-size: 12px; padding-top: 42px; margin-top: auto; }
+.access-story-foot > span { color: var(--brand-cyan); margin-inline: 6px; }
+.access-panel { min-width: 0; padding: clamp(26px, 4vw, 58px); background: var(--surface); }
+.access-panel-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--text-muted); margin-bottom: 28px; }
+.access-badge { color: var(--accent-text); background: var(--accent-soft); border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: .8px; padding: 6px 9px; }
+.access-panel > h2 { font-size: 29px; letter-spacing: -.8px; line-height: 1.25; scroll-margin-top: 110px; }
+.access-panel > h2:focus { outline: none; }
+.access-intro { color: var(--text-muted); font-size: 14px; line-height: 1.8; margin: 12px 0 25px; }
+.access-field { margin-top: 19px; }
+.access-field label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.access-field label > span { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+.access-field input { display: block; width: 100%; min-height: 49px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-soft); color: var(--text-muted); opacity: 1; cursor: not-allowed; font-size: 14px; }
+.access-field input::placeholder { color: var(--text-muted); opacity: 1; }
+.access-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 0; border: 0; background: transparent; color: var(--primary); font-size: 13px; font-weight: 600; text-align: left; }
+.access-link:hover { text-decoration: underline; }
+.access-submit, .access-return { width: 100%; margin-top: 20px; min-height: 48px; }
+.access-submit:disabled { cursor: not-allowed; background: var(--neutral-100); border-color: var(--border); color: var(--neutral-600); }
+.access-next { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 28px; font-size: 13px; color: var(--text-muted); }
+.access-next > span { display: block; }
+.access-help { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; margin-top: 26px; border-top: 1px solid var(--border); padding-top: 18px; }
+.access-back { margin-top: 12px; }
+.access-caption { color: var(--text-muted); font-size: 12px; margin-top: 14px; }
+.access-recovery { display: flex; gap: 13px; border: 1px solid var(--border); padding: 17px; border-radius: 8px; margin-bottom: 12px; }
+.access-recovery > svg { color: var(--primary); margin-top: 2px; }
+.access-recovery h3 { font-size: 14px; }
+.access-recovery p, .access-info p { font-size: 13px; color: var(--text-muted); line-height: 1.8; margin-top: 6px; }
+.access-expired-icon { display: grid; place-items: center; width: 66px; height: 66px; background: var(--accent-soft); color: var(--accent-text); border-radius: 50%; margin: 26px 0; }
+.access-info { padding: 20px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; }
+.access-info strong { font-size: 14px; }
+@media (min-width: 1101px) and (max-width: 1550px) { .workspace { display: none; }.topbar { flex-wrap: wrap; justify-content: center; }.navigation { justify-content: center; } }
+@media (max-width: 900px) { .access-layout { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }.access-panel, .access-story { padding: 28px; }.access-story h2 { font-size: 30px; }.access-switcher > span { width: 100%; margin-bottom: 4px; } }
+@media (max-width: 760px) {
+  .access-layout { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .access-story { padding: 26px; }.access-story h2 { font-size: 28px; margin-block: 12px; }
+  .access-symbol, .access-story-note, .access-story-foot { display: none; }.access-story .hero-kicker { margin-top: 24px; }
+  .access-panel { padding: 26px 22px; }.access-panel > h2 { font-size: 26px; }
+  .access-switcher { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .access-switcher > span { grid-column: 1 / -1; }.access-switcher button { font-size: 12px; padding-inline: 10px; gap: 6px; text-align: left; }
+  .demo-banner strong { flex: 1; min-width: 0; }.demo-banner { align-items: flex-start; }
+}
+@media (max-width: 400px) { .brand-logo { width: clamp(120px, 36vw, 145px); } }

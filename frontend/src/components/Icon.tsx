@@ -1,5 +1,7 @@
-export type IconName = 'grid' | 'company' | 'branch' | 'users' | 'apps' | 'arrow' | 'search' | 'menu' | 'close'
+export type IconName = 'grid' | 'company' | 'branch' | 'users' | 'apps' | 'arrow' | 'search' | 'menu' | 'close' | 'key' | 'clock'
 const paths: Record<IconName, string> = {
+  key: 'M15 3a6 6 0 0 0-5.5 8.4L3 18v3h3v-3h3v-3l3.6-3.6A6 6 0 1 0 15 3z M17 7h.01',
+  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
   company: 'M5 21V3h14v18 M2 21h20 M9 7h1 M14 7h1 M9 11h1 M14 11h1 M10 21v-6h4v6',
   branch: 'M12 7v3 M5 17v-7h14v7 M2 17h6v4H2z M16 17h6v4h-6z M9 3h6v4H9z',
