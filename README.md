@@ -139,6 +139,13 @@ npm.cmd run dev
 
 Abrir `http://127.0.0.1:5173`. La pantalla debe identificar LS Core Multi-Tenant
 v4.0. No hace peticiones al backend ni representa conectividad, usuarios o empresas.
+En **Acceso (demo)** se exploran inicio de sesión, primer ingreso, recuperación
+y sesión expirada. No requiere backend ni configurar `.env.local`: los campos
+de credenciales y las acciones de envío están deshabilitados. La advertencia de
+demostración permanece visible al desplazarse y los controles solo cambian vistas.
+No hay autenticación, solicitudes de recuperación ni cambios de contraseña.
+Este incremento visual mantiene **F12 y LFD-56 en Backlog** y no completa
+precondiciones de F03–F11. La aprobación técnica y visual sigue pendiente.
 Para detener Vite, usar **Ctrl+C**; si Windows pregunta por el trabajo por lotes,
 responder `S`.
 
