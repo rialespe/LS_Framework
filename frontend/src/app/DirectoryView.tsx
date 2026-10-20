@@ -13,10 +13,10 @@ export function EntityName({ item, index, onSelect, selected = false }: { item: 
   </button>
 }
 
-type Props = { section: Directory; query: string; onQuery: (query: string) => void; selected: DemoItem | null; onSelect: (item: DemoItem | null) => void }
+type Props = { section: Directory; query: string; onQuery: (query: string) => void; selected: DemoItem | null; onSelect: (item: DemoItem | null) => void; statusFilter?: 'Activo' | 'Pendiente' | 'Suspendido'; searchByName?: boolean }
 
-export function DirectoryView({ section, query, onQuery, selected, onSelect }: Props) {
-  const filtered = demo[section].filter(item => `${item.name} ${item.caption} ${item.category} ${item.id}`
+export function DirectoryView({ section, query, onQuery, selected, onSelect, statusFilter, searchByName = false }: Props) {
+  const filtered = demo[section].filter(item => (!statusFilter || item.status === statusFilter) && (searchByName ? item.name : `${item.name} ${item.caption} ${item.category} ${item.id}`)
     .toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es')))
   return <>
     <div className="directory-toolbar">
@@ -31,7 +31,7 @@ export function DirectoryView({ section, query, onQuery, selected, onSelect }: P
           <p>Datos ficticios · Selecciona un registro para explorar su detalle.</p></div><span className="subtle-tag">Solo vista previa</span></div>
         {filtered.length === 0 ? <div className="empty-state" role="status">
           <span className="empty-icon"><Icon name="search" size={28} /></span><h3>No encontramos coincidencias</h3>
-          <p>Prueba con otro nombre o limpia la búsqueda para volver a los datos de muestra.</p>
+          <p>Prueba con otro nombre{statusFilter ? ' o cambia el filtro de estado' : ' o limpia la búsqueda'} para volver a los datos de muestra.</p>
           <button className="button" onClick={() => onQuery('')}>Limpiar búsqueda</button>
         </div> : section === 'Aplicaciones' ? <div className="app-cards">{filtered.map((item, i) =>
           <button key={item.id} className={`application-card ${selected?.id === item.id ? 'selected' : ''}`} aria-pressed={selected?.id === item.id} onClick={() => onSelect(item)}>

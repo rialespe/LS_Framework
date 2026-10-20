@@ -9,7 +9,7 @@ const activity = [
   { icon: 'apps', name: 'LS Core', text: 'Aplicación de muestra disponible en el catálogo', time: 'Ayer' },
 ] as const
 
-export function Dashboard({ onNavigate, onCompany }: { onNavigate: (section: Directory) => void; onCompany: (item: DemoItem) => void }) {
+export function Dashboard({ onNavigate, onCompany, onPortal }: { onNavigate: (section: Directory) => void; onCompany: (item: DemoItem) => void; onPortal: () => void }) {
   return <>
     <section className="hero" aria-label="Bienvenida a LS Core">
       <div className="hero-copy"><span className="hero-kicker">LS CORE · MULTI-TENANT v4.0</span>
@@ -24,6 +24,7 @@ export function Dashboard({ onNavigate, onCompany }: { onNavigate: (section: Dir
         <span className="art-caption">UN ECOSISTEMA CONECTADO</span>
       </div>
     </section>
+    <section className="portal-entry" aria-label="Acceso al portal global de muestra"><span className="quick-icon"><Icon name="company" size={26} /></span><div><h2>Portal global (demo)</h2><p>Empresas, estados y fichas ficticias · Sin funciones administrativas</p></div><button className="button" onClick={onPortal}>Explorar portal global<Icon name="arrow" size={17} /></button></section>
     <section className="metrics" aria-label="Resumen de datos ficticios">
       {(['Empresas', 'Sucursales', 'Usuarios', 'Aplicaciones'] as Directory[]).map((item, index) =>
         <button className="metric" key={item} onClick={() => onNavigate(item)}>

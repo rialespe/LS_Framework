@@ -5,6 +5,7 @@ import { Dashboard } from './Dashboard'
 import { AccessPreview } from './AccessPreview'
 import { ContextPreview } from './ContextPreview'
 import { SessionsPreview } from './SessionsPreview'
+import { GlobalPortalPreview } from './GlobalPortalPreview'
 import { DirectoryView } from './DirectoryView'
 import { descriptions, icons, sections } from './demo'
 import type { DemoItem, Section } from './demo'
@@ -15,7 +16,7 @@ const previews = {
   'Sesiones (demo)': { icon: 'device', description: 'Una mirada a la administración de dispositivos. Sin sesiones reales.' },
 } as const
 type Preview = keyof typeof previews
-type NavigationSection = Section | Preview
+type NavigationSection = Section | Preview | 'Portal global (demo)'
 
 export function App() {
   const [section, setSection] = useState<NavigationSection>('Dashboard')
@@ -31,7 +32,7 @@ export function App() {
     heading.current?.focus()
   }
 
-  const description = section in previews ? previews[section as Preview].description : section === 'Dashboard' ? 'Explora una nueva forma de visualizar tu organización con LS Core.' : descriptions[section as Exclude<Section, 'Dashboard'>]
+  const description = section === 'Portal global (demo)' ? 'Directorio global de muestra. Sin operaciones administrativas.' : section in previews ? previews[section as Preview].description : section === 'Dashboard' ? 'Explora una nueva forma de visualizar tu organización con LS Core.' : descriptions[section as Exclude<Section, 'Dashboard'>]
 
   return <div id="inicio">
     <a className="skip-link" href="#main">Saltar al contenido</a>
@@ -50,9 +51,9 @@ export function App() {
         <h1 ref={heading} tabIndex={-1}>{section === 'Dashboard' ? 'Todo conectado. Todo en un lugar.' : section}</h1>
         <p>{description}</p>
       </div><span className="preview-tag"><span />Previsualización visual</span></div>
-      {section === 'Contexto (demo)' ? <ContextPreview /> : section === 'Sesiones (demo)' ? <SessionsPreview /> : section === 'Acceso (demo)' ? <AccessPreview /> : section === 'Dashboard' ? <Dashboard onNavigate={navigate} onCompany={item => { navigate('Empresas'); setSelected(item) }} /> :
+      {section === 'Portal global (demo)' ? <GlobalPortalPreview onBack={() => navigate('Dashboard')} /> : section === 'Contexto (demo)' ? <ContextPreview /> : section === 'Sesiones (demo)' ? <SessionsPreview /> : section === 'Acceso (demo)' ? <AccessPreview /> : section === 'Dashboard' ? <Dashboard onNavigate={navigate} onPortal={() => navigate('Portal global (demo)')} onCompany={item => { navigate('Empresas'); setSelected(item) }} /> :
         <DirectoryView section={section} query={query} onQuery={value => { setQuery(value); setSelected(null) }} selected={selected} onSelect={setSelected} />}
-      <footer><span><strong>LS Core</strong> Multi-Tenant v4.0 <span className="footer-divider">/</span> LS Soluciones SpA</span><span>Previsualización visual · F12, LFD-56 y LFD-57 en Backlog</span></footer>
+      <footer><span><strong>LS Core</strong> Multi-Tenant v4.0 <span className="footer-divider">/</span> LS Soluciones SpA</span><span>Previsualización visual · F12, LFD-56 y LFD-57 en Backlog · F13 y LFD-58 en Backlog</span></footer>
     </main>
   </div>
 }
