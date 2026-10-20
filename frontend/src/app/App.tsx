@@ -1,37 +1,44 @@
+import { useRef, useState } from 'react'
 import { Brand } from '../components/Brand'
-import { appConfig } from './config'
+import { Icon } from '../components/Icon'
+import { Dashboard } from './Dashboard'
+import { DirectoryView } from './DirectoryView'
+import { descriptions, icons, sections } from './demo'
+import type { DemoItem, Section } from './demo'
 
 export function App() {
-  return (
-    <div className="shell" id="inicio">
-      <header className="header">
-        <Brand />
-        <span className="version">Framework · v4.0</span>
-      </header>
-      <main>
-        <section className="intro" aria-labelledby="title">
-          <p className="eyebrow">LS CORE / BASE TÉCNICA</p>
-          <h1 id="title">LS Core<br /><span>Multi-Tenant v4.0</span></h1>
-          <p className="description">Una base común para las aplicaciones de LS Soluciones SpA.</p>
-          <div className="notice">
-            <span className="notice-dot" aria-hidden="true" />
-            Estructura inicial · LFD-22
-          </div>
-        </section>
-        <section className="foundation" aria-labelledby="foundation-title">
-          <div>
-            <p className="eyebrow">PUNTO DE PARTIDA</p>
-            <h2 id="foundation-title">Preparado para construir.</h2>
-            <p>El proyecto cuenta con una base modular de backend y frontend. Las funciones de administración se incorporarán en próximas etapas.</p>
-          </div>
-          <div className="technical">
-            <h3>Configuración de desarrollo</h3>
-            <dl><dt>URL base de API</dt><dd><code>{appConfig.apiBaseUrl}</code></dd></dl>
-            <p>Esta pantalla funciona de forma independiente y no comprueba la conexión al backend.</p>
-          </div>
-        </section>
-      </main>
-      <footer>LS Soluciones SpA <span>LS Core · Monolito modular</span></footer>
-    </div>
-  )
+  const [section, setSection] = useState<Section>('Dashboard')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<DemoItem | null>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const navigate = (next: Section) => {
+    setSection(next)
+    setMenuOpen(false)
+    setQuery('')
+    setSelected(null)
+    heading.current?.focus()
+  }
+
+  return <div id="inicio">
+    <a className="skip-link" href="#main">Saltar al contenido</a>
+    <header className="topbar">
+      <Brand onHome={() => navigate('Dashboard')} />
+      <button className="menu-toggle icon-button" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="primary-nav" onClick={() => setMenuOpen(!menuOpen)}><Icon name={menuOpen ? 'close' : 'menu'} /></button>
+      <nav id="primary-nav" className={menuOpen ? 'navigation open' : 'navigation'} aria-label="Navegación principal">
+        {sections.map(item => <button key={item} aria-current={section === item ? 'page' : undefined} onClick={() => navigate(item)}><Icon name={icons[item]} size={17} />{item}</button>)}
+      </nav>
+      <div className="workspace"><span className="workspace-dot" /><span>Espacio de muestra<small>Vista administrativa</small></span><span className="workspace-avatar" aria-hidden="true"><Icon name="grid" size={16} /></span></div>
+    </header>
+    <div className="demo-banner"><span className="demo-label">DEMO</span><strong>Modo demostración — Sin conexión al backend</strong><span className="banner-extra">Datos ficticios · Sin cambios persistentes</span></div>
+    <main className="main" id="main">
+      <div className="page-heading"><div><p className="eyebrow">WORKSPACE / {section === 'Dashboard' ? 'VISTA GENERAL' : section.toLocaleUpperCase('es')}</p>
+        <h1 ref={heading} tabIndex={-1}>{section === 'Dashboard' ? 'Todo conectado. Todo en un lugar.' : section}</h1>
+        <p>{section === 'Dashboard' ? 'Explora una nueva forma de visualizar tu organización con LS Core.' : descriptions[section]}</p>
+      </div><span className="preview-tag"><span />Previsualización visual</span></div>
+      {section === 'Dashboard' ? <Dashboard onNavigate={navigate} onCompany={item => { navigate('Empresas'); setSelected(item) }} /> :
+        <DirectoryView section={section} query={query} onQuery={value => { setQuery(value); setSelected(null) }} selected={selected} onSelect={setSelected} />}
+      <footer><span><strong>LS Core</strong> Multi-Tenant v4.0 <span className="footer-divider">/</span> LS Soluciones SpA</span><span>LFD-55 · Previsualización visual · F12 en Backlog</span></footer>
+    </main>
+  </div>
 }
