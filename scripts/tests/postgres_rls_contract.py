@@ -7,6 +7,7 @@ Also runs after the historical V8 checks in test_postgres_migrations.py (CI).
 import json
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 sys.dont_write_bytecode = True
 from test_postgres_migrations import (
@@ -37,6 +38,88 @@ def relations(cluster):
     return {row['name']: row for row in map(json.loads, rows.splitlines())}
 
 
+def write_fixture(cluster):
+    """Two synthetic tenants and one branch each, created by their owner before V9."""
+    ids = {'tenant.tenants': [], 'tenant.branches': []}
+    for label in ['A', 'B']:
+        tenant, branch = str(uuid4()), str(uuid4())
+        ids['tenant.tenants'].append(tenant)
+        ids['tenant.branches'].append(branch)
+        cluster.query(
+            f"INSERT INTO tenant.tenants(id,name,status) VALUES ('{tenant}','V9 fixture {label}','PENDING'); "
+            "INSERT INTO tenant.branches(id,tenant_id,code,name,status) "
+            f"VALUES ('{branch}','{tenant}','D1-{label}','V9 branch {label}','ACTIVE')",
+            'ls_core_migrator_dev')
+    for table in ids:
+        check(cluster.query(f'SELECT count(*) FROM {table}', 'ls_core_migrator_dev') == '2',
+              table + ': owner sees both A/B fixture rows before V9')
+    return ids
+
+
+def test_owner_dml(cluster, ids):
+    """Committed attempts: admin snapshots prove filtering, not ACL denial or rollback.
+
+    This is V9 default-deny coverage only; it does not establish G2/G3 or close F03.
+    No tenant selector, policy, GRANT or new role is involved.
+    """
+    tables = sorted(ids)
+    physical = data_snapshot(cluster, tables)
+    for table in tables:
+        check(len(physical[table].splitlines()) == 2, table + ': administrator sees both physical A/B rows')
+        check(cluster.query(
+            "SELECT c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user) "
+            "AND NOT r.rolsuper AND NOT r.rolbypassrls AND row_security_active(c.oid) "
+            "AND has_schema_privilege(current_user,'tenant','USAGE') "
+            "AND has_table_privilege(current_user,c.oid,'SELECT') "
+            "AND has_table_privilege(current_user,c.oid,'INSERT') "
+            "AND has_table_privilege(current_user,c.oid,'UPDATE') "
+            "AND has_table_privilege(current_user,c.oid,'DELETE') "
+            "FROM pg_class c JOIN pg_roles r ON r.rolname=current_user "
+            f"WHERE c.oid='{table}'::regclass", 'ls_core_migrator_dev') == 't',
+              table + ': restricted owner has all four DML privileges and active FORCE RLS')
+        check(cluster.query(f'SELECT count(*) FROM {table}', 'ls_core_migrator_dev') == '0',
+              table + ': FORCE/default-deny hides both A/B rows from owner')
+        if table == 'tenant.tenants':
+            inserts = ["INSERT INTO tenant.tenants(id,name,status) "
+                       f"VALUES ('{uuid4()}','V9 denied insert','PENDING')"]
+        else:
+            inserts = ["INSERT INTO tenant.branches(id,tenant_id,code,name,status) "
+                       f"VALUES ('{uuid4()}','{tenant}','D1-denied','V9 denied branch','ACTIVE')"
+                       for tenant in ids['tenant.tenants']]
+        predicate = 'id IN (' + ','.join("'" + value + "'" for value in ids[table]) + ')'
+        statements = {
+            'SELECT': f'SELECT * FROM {table} WHERE {predicate}',
+            'INSERT': inserts[0],
+            'UPDATE': f"UPDATE {table} SET name='V9 unauthorized change' WHERE {predicate}",
+            'DELETE': f'DELETE FROM {table} WHERE {predicate}',
+        }
+        for insert in inserts:
+            rejected = cluster.psql(script='-', reply='\\set VERBOSITY verbose\n' + insert + ';\n',
+                                    user='ls_core_migrator_dev')
+            check(rejected.returncode != 0 and '42501' in rejected.stderr
+                  and 'row-level security' in rejected.stderr,
+                  table + ': owner INSERT denied by RLS (SQLSTATE 42501), not ACL')
+            check(data_snapshot(cluster, tables) == physical,
+                  table + ': administrator confirms rejected INSERT left no physical changes')
+        for operation in ['UPDATE', 'DELETE']:
+            changed = cluster.query('WITH changed AS (' + statements[operation]
+                                    + ' RETURNING id) SELECT count(*) FROM changed', 'ls_core_migrator_dev')
+            check(changed == '0', table + ': owner ' + operation + ' affects zero protected A/B rows')
+            check(data_snapshot(cluster, tables) == physical,
+                  table + ': administrator confirms ' + operation + ' left both A/B rows unchanged')
+        for operation, statement in statements.items():
+            denied = cluster.psql(script='-', reply='\\set VERBOSITY verbose\n' + statement + ';\n',
+                                  user='ls_core_app_dev')
+            check(denied.returncode != 0 and '42501' in denied.stderr
+                  and 'permission denied' in denied.stderr and 'row-level security' not in denied.stderr,
+                  table + ': runtime ' + operation + ' denied by ACL (SQLSTATE 42501), not RLS')
+        rejected = cluster.psql(sql=f'SET row_security=off; SELECT * FROM {table};',
+                                user='ls_core_migrator_dev')
+        check(rejected.returncode != 0 and 'row-level security' in rejected.stderr,
+              table + ': owner cannot bypass FORCE with row_security=off')
+    check(data_snapshot(cluster, tables) == physical, 'all DML attempts leave physical A/B fixture unchanged')
+
+
 def test_rls(cluster):
     check(len(PROTECTED) == 22 and len(GLOBAL) == 7 and not PROTECTED & GLOBAL,
           'V9 independent contract: 22 protected and seven global tables')
@@ -48,10 +131,7 @@ def test_rls(cluster):
     roles = cluster.query("SELECT row_to_json(r) FROM pg_roles r WHERE rolname IN "
                           "('ls_core_app_dev','ls_core_migrator_dev') ORDER BY rolname")
     old_history = history(cluster).splitlines()
-    # Existing synthetic row proves FORCE/default-deny, independently of the runtime ACL denial.
-    cluster.query("INSERT INTO tenant.tenants(name,status) VALUES ('V9 isolated fixture','PENDING')")
-    check(cluster.query('SELECT count(*) FROM tenant.tenants', 'ls_core_migrator_dev') == '1',
-          'table owner can see fixture before V9')
+    ids = write_fixture(cluster)
     check(cluster.flyway('migrate', location=SOURCE, target='9').returncode == 0,
           'real Flyway applies V9 as the restricted migrator')
     after = relations(cluster)
@@ -80,18 +160,13 @@ def test_rls(cluster):
           and cluster.query("SELECT count(*) FROM pg_auth_members WHERE member="
                             "(SELECT oid FROM pg_roles WHERE rolname='ls_core_app_dev')") == '0',
           'runtime has no superuser/BYPASSRLS or role memberships')
-    denied = cluster.psql(script='-',
-                          reply='\\set VERBOSITY verbose\nSELECT * FROM tenant.tenants;\n',
-                          user='ls_core_app_dev')
-    check(denied.returncode != 0 and '42501' in denied.stderr,
-          'runtime SELECT denied by ACL (SQLSTATE 42501), not evidence of RLS filtering')
-    check(cluster.query('SELECT count(*) FROM tenant.tenants', 'ls_core_migrator_dev') == '0',
-          'FORCE/default-deny hides existing row from its owner despite owner SELECT privilege')
-    rejected = cluster.psql(sql="SET row_security=off; SELECT * FROM tenant.tenants;",
-                            user='ls_core_migrator_dev')
-    check(rejected.returncode != 0 and 'row-level security' in rejected.stderr,
-          'owner cannot bypass FORCE with row_security=off')
-    cluster.query("DELETE FROM tenant.tenants WHERE name='V9 isolated fixture'")
+    test_owner_dml(cluster, ids)
+    # Administrator deletes only this fixture, child first; never broad DELETE/TRUNCATE.
+    for table in ['tenant.branches', 'tenant.tenants']:
+        predicate = 'id IN (' + ','.join("'" + value + "'" for value in ids[table]) + ')'
+        check(cluster.query(f'WITH removed AS (DELETE FROM {table} WHERE {predicate} RETURNING id) '
+                            'SELECT count(*) FROM removed') == '2',
+              table + ': administrator cleans exactly its two fixture rows')
     check(data_snapshot(cluster, sorted(before)) == data, 'all business data and seven catalog seeds unchanged')
     check(cluster.query("SELECT row_to_json(r) FROM pg_roles r WHERE rolname IN "
                         "('ls_core_app_dev','ls_core_migrator_dev') ORDER BY rolname") == roles,
