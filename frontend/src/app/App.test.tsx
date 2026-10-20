@@ -98,7 +98,7 @@ describe('Administrative visual preview', () => {
     expect(screen.getByText(accessWarning)).toBeVisible()
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
-    expect(screen.getByRole('contentinfo')).toHaveTextContent('F12 y LFD-56 en Backlog')
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('F12, LFD-56 y LFD-57 en Backlog')
     expect(screen.getByRole('region', { name: 'Resumen de datos ficticios' })).toBeInTheDocument()
   })
 
