@@ -150,6 +150,14 @@ de empresa y descarta su selección al salir. No establece permisos ni modifica 
 pantallas. Los dispositivos, estados y fechas son ficticios y sus acciones están
 deshabilitadas. No hay solicitudes de red, cookies ni almacenamiento de contexto.
 
+Desde el **Dashboard**, usar **Explorar portal global** para abrir **Portal global
+(demo)** y **Volver al Dashboard** para regresar. Sus indicadores se calculan desde
+las empresas ficticias existentes; permite búsqueda por nombre, filtros por estado
+y consulta de fichas. No hay empresas suspendidas en el fixture actual. Aplicaciones,
+administrador inicial y auditoría indican sus datos no disponibles, sin simular
+asignaciones ni eventos reales. **F13 y LFD-58 permanecen en Backlog**: el portal
+es exclusivamente visual y no ofrece funciones administrativas.
+
 Estos incrementos visuales mantienen **F12, LFD-56 y LFD-57 en Backlog** y no completan
 precondiciones de F03–F11. La aprobación técnica y visual sigue pendiente.
 Para detener Vite, usar **Ctrl+C**; si Windows pregunta por el trabajo por lotes,
