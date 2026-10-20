@@ -730,6 +730,8 @@ def main():
         test_rls(cluster)
         from postgres_catalog_acl_contract import test_catalog_acl
         test_catalog_acl(cluster)
+        from postgres_catalog_service_contract import test_catalog_service
+        test_catalog_service(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
