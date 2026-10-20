@@ -22,10 +22,23 @@ public final class GlobalCatalogReader {
             String description, String status) { }
 
     public List<Application> applications() {
+        return applications(null);
+    }
+
+    public List<Application> applications(int limit, int offset) {
+        return applications(new Page(limit, offset));
+    }
+
+    private List<Application> applications(Page page) {
         return read(connection -> {
             try (var statement = connection.prepareStatement(
-                    "SELECT id, code, name, description, status FROM catalog.applications ORDER BY code, id")) {
+                    "SELECT id, code, name, description, status FROM catalog.applications ORDER BY code, id"
+                    + (page == null ? "" : " LIMIT ? OFFSET ?"))) {
                 statement.setQueryTimeout(5);
+                if (page != null) {
+                    statement.setInt(1, page.limit());
+                    statement.setInt(2, page.offset());
+                }
                 try (var rows = statement.executeQuery()) {
                     List<Application> result = new ArrayList<>();
                     while (rows.next()) {
@@ -39,13 +52,26 @@ public final class GlobalCatalogReader {
     }
 
     public List<Module> modules(UUID applicationId) {
+        return modules(applicationId, null);
+    }
+
+    public List<Module> modules(UUID applicationId, int limit, int offset) {
+        return modules(applicationId, new Page(limit, offset));
+    }
+
+    private List<Module> modules(UUID applicationId, Page page) {
         Objects.requireNonNull(applicationId, "applicationId");
         return read(connection -> {
             try (var statement = connection.prepareStatement(
                     "SELECT id, application_id, code, name, description, status FROM catalog.modules "
-                    + "WHERE application_id = ? ORDER BY code, id")) {
+                    + "WHERE application_id = ? ORDER BY code, id"
+                    + (page == null ? "" : " LIMIT ? OFFSET ?"))) {
                 statement.setQueryTimeout(5);
                 statement.setObject(1, applicationId);
+                if (page != null) {
+                    statement.setInt(2, page.limit());
+                    statement.setInt(3, page.offset());
+                }
                 try (var rows = statement.executeQuery()) {
                     List<Module> result = new ArrayList<>();
                     while (rows.next()) {
@@ -56,6 +82,14 @@ public final class GlobalCatalogReader {
                 }
             }
         });
+    }
+
+    private record Page(int limit, int offset) {
+        private Page {
+            if (limit < 1 || limit > 100 || offset < 0 || offset > 10000) {
+                throw new IllegalArgumentException("limit must be 1..100 and offset 0..10000");
+            }
+        }
     }
 
     private <T> T read(Query<T> query) {

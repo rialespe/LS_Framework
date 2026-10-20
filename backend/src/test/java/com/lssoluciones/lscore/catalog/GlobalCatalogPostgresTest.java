@@ -45,12 +45,13 @@ class GlobalCatalogPostgresTest {
         var source = source();
         var reader = new GlobalCatalogReader(source);
         var applications = reader.applications();
-        assertEquals(1, applications.size());
-        assertEquals("ls-core", applications.getFirst().code());
+        assertEquals(3, applications.size());
+        var core = applications.stream().filter(application -> application.code().equals("ls-core"))
+                .findFirst().orElseThrow();
         assertTrue(source.last.isClosed());
-        var modules = reader.modules(applications.getFirst().id());
+        var modules = reader.modules(core.id());
         assertEquals(3, modules.size());
-        assertTrue(modules.stream().allMatch(module -> module.applicationId().equals(applications.getFirst().id())));
+        assertTrue(modules.stream().allMatch(module -> module.applicationId().equals(core.id())));
         assertTrue(reader.modules(UUID.randomUUID()).isEmpty());
         assertEquals(3, source.cleanCloses);
         assertTrue(source.last.isClosed());
@@ -67,8 +68,58 @@ class GlobalCatalogPostgresTest {
         assertEquals(1, source.cleanCloses);
         assertTrue(source.last.isClosed());
         source.failQuery = false;
-        assertEquals(1, reader.applications().size());
+        assertEquals(3, reader.applications().size());
         assertEquals(2, source.cleanCloses);
+    }
+
+    @Test
+    void paginationIsOrderedFilteredImmutableAndClosesEveryConnection() throws Exception {
+        var source = source();
+        var reader = new GlobalCatalogReader(source);
+        var all = reader.applications();
+        assertEquals(java.util.List.of("c4-a", "c4-z", "ls-core"),
+                all.stream().map(GlobalCatalogReader.Application::code).toList());
+        var first = reader.applications(1, 0);
+        assertEquals(all.subList(0, 1), first);
+        assertThrows(UnsupportedOperationException.class, first::clear);
+        assertEquals(all.subList(1, 3), reader.applications(2, 1));
+        assertEquals(all, reader.applications(100, 0));
+        assertTrue(reader.applications(100, 10000).isEmpty());
+        UUID core = all.getLast().id();
+        var modules = reader.modules(core);
+        assertEquals(java.util.List.of("access", "branches", "memberships"),
+                modules.stream().map(GlobalCatalogReader.Module::code).toList());
+        var page = reader.modules(core, 1, 1);
+        assertEquals(modules.subList(1, 2), page);
+        assertThrows(UnsupportedOperationException.class, page::clear);
+        assertEquals(modules.subList(2, 3), reader.modules(core, 2, 2));
+        assertEquals(modules, reader.modules(core, 100, 0));
+        assertTrue(reader.modules(core, 1, 3).isEmpty());
+        assertTrue(reader.modules(core, 100, 10000).isEmpty());
+        assertTrue(reader.modules(UUID.randomUUID(), 1, 0).isEmpty());
+        var foreign = reader.modules(all.getFirst().id(), 100, 0);
+        assertEquals(1, foreign.size());
+        assertEquals(all.getFirst().id(), foreign.getFirst().applicationId());
+        assertEquals(13, source.cleanCloses);
+        assertTrue(source.last.isClosed());
+    }
+
+    @Test
+    void invalidPaginationIsRejectedBeforeOpeningAnyConnection() throws Exception {
+        var source = source();
+        var reader = new GlobalCatalogReader(source);
+        UUID application = UUID.randomUUID();
+        for (int limit : new int[] {Integer.MIN_VALUE, 0, 101, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () -> reader.applications(limit, 0));
+            assertThrows(IllegalArgumentException.class, () -> reader.modules(application, limit, 0));
+        }
+        for (int offset : new int[] {Integer.MIN_VALUE, -1, 10001, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () -> reader.applications(1, offset));
+            assertThrows(IllegalArgumentException.class, () -> reader.modules(application, 1, offset));
+        }
+        assertThrows(NullPointerException.class, () -> reader.modules(null, 1, 0));
+        assertEquals(null, source.last);
+        assertEquals(0, source.cleanCloses);
     }
 
     @Test
