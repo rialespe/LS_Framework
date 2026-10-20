@@ -8,6 +8,7 @@ la documentación para revisión; no cierra por sí sola la historia F01.
 ## Documentación del proyecto
 
 - [Arquitectura y fronteras modulares](docs/architecture/modules.md).
+- [Contrato inicial de identidad global LFD-31 P0](docs/identity-input.md): validación en memoria y dependencias pendientes de F04.
 - [Índice de ADR](docs/adr/README.md): stack, PostgreSQL y calidad/flujo Git.
 - [Guía operativa de Codex](docs/codex/README.md).
 - [Plantilla de prompts por incidencia Jira](docs/codex/prompt-template.md).
