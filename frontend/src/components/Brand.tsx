@@ -1,8 +1,8 @@
 export function Brand({ onHome }: { onHome?: () => void }) {
   return (
     <a className="brand" href="#inicio" aria-label="LS Core, inicio" onClick={onHome}>
-      <span className="brand-mark" aria-hidden="true">LS</span>
-      <span>LS Soluciones<small className="brand-company">LS CORE <span>ADMIN WORKSPACE</span></small></span>
+      <img className="brand-logo" src="/branding/logoLS_Vertical.png" alt="LS Soluciones — Ingeniería y Consultoría" width="2172" height="724" />
+      <span className="brand-platform">LS Core<small>Administración</small></span>
     </a>
   )
 }

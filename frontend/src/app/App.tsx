@@ -28,7 +28,7 @@ export function App() {
       <nav id="primary-nav" className={menuOpen ? 'navigation open' : 'navigation'} aria-label="Navegación principal">
         {sections.map(item => <button key={item} aria-current={section === item ? 'page' : undefined} onClick={() => navigate(item)}><Icon name={icons[item]} size={17} />{item}</button>)}
       </nav>
-      <div className="workspace"><span className="workspace-dot" /><span>Espacio de muestra<small>Vista administrativa</small></span><span className="workspace-avatar">LS</span></div>
+      <div className="workspace"><span className="workspace-dot" /><span>Espacio de muestra<small>Vista administrativa</small></span><span className="workspace-avatar" aria-hidden="true"><Icon name="grid" size={16} /></span></div>
     </header>
     <div className="demo-banner"><span className="demo-label">DEMO</span><strong>Modo demostración — Sin conexión al backend</strong><span className="banner-extra">Datos ficticios · Sin cambios persistentes</span></div>
     <main className="main" id="main">

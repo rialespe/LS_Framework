@@ -11,6 +11,10 @@ describe('Administrative visual preview', () => {
   it('renders identity, demonstration notice and accessible structure', () => {
     render(<App />)
     expect(screen.getByRole('link', { name: 'LS Core, inicio' })).toHaveAttribute('href', '#inicio')
+    const logo = screen.getByRole('img', { name: 'LS Soluciones — Ingeniería y Consultoría' })
+    expect(logo).toHaveAttribute('src', '/branding/logoLS_Vertical.png')
+    expect(logo).toHaveAttribute('width', '2172')
+    expect(logo).toHaveAttribute('height', '724')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Todo conectado')
     expect(screen.getByText('Modo demostración — Sin conexión al backend')).toBeVisible()
     expect(screen.getByRole('banner')).toBeInTheDocument()
