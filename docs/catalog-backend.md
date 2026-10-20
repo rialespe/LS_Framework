@@ -1,8 +1,19 @@
-# Lector global C3
+# Lector global C3/C4
 
 `GlobalCatalogReader` expone `applications()` y `modules(UUID applicationId)` con
 resultados inmutables y SQL fijo. No publica endpoints. Solo lee columnas públicas
 de `catalog.applications` y `catalog.modules`; no otorga autorización empresarial.
+
+Contrato paginado interno: `applications(int limit, int offset)` devuelve
+`List<Application>` y `modules(UUID applicationId, int limit, int offset)` devuelve
+`List<Module>`. Ambas listas y sus registros son inmutables. `limit` debe estar
+entre 1 y 100 y `offset` entre 0 y 10000, inclusivos; valores inválidos generan
+`IllegalArgumentException` antes de abrir conexión. `applicationId` es obligatorio
+(`NullPointerException` si es nulo). SQL usa `ORDER BY code, id` y parámetros JDBC
+para UUID, `LIMIT` y `OFFSET`. Una página sin coincidencias es una lista vacía.
+No se devuelve total ni se conserva una instantánea entre llamadas: cambios
+concurrentes pueden desplazar filas entre páginas. Los métodos originales siguen
+disponibles sin límite; los consumidores futuros deben preferir las sobrecargas.
 
 Deshabilitado por defecto. Para registrar el bean, configurar externamente:
 
@@ -34,5 +45,5 @@ modificarlos, autentica Java realmente como C2 y elimina exclusivamente su clús
 También se integra al arnés CI existente. No ejecutarlo contra PostgreSQL compartido.
 
 Límites: conexiones por llamada (coste de autenticación; C2 limita a tres sesiones),
-sin paginación ni reintentos automáticos. La configuración remota/TLS, entrega y
+sin reintentos automáticos. La configuración remota/TLS, entrega y
 rotación de secretos requieren revisión operativa antes de un despliegue real.
