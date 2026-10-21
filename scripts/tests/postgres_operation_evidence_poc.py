@@ -1,4 +1,4 @@
-"""D3.5: one synthetic operation-evidence scenario, executed once by the PG17 CI job.
+"""D3.5/D3.6: one operation-evidence scenario, executed once by the PG17 CI job.
 
 Only standard-library Python and psql; disposable_cluster owns creation/cleanup.
 No external endpoint, production migration, authenticator or test suite is invoked.
@@ -159,7 +159,7 @@ class Coordinator:
             raise AssertionError('Unexpected physical connection')
         grant_id = str(uuid4())  # Deliberately disclosed to attacker below; never a credential.
         check(self.emitter.execute(insert_evidence(binding, claims, grant_id)) == [],
-              'trusted issuer committed immutable evidence using its separate LOGIN')
+              'trusted issuer committed evidence with immutable claims using its separate LOGIN')
         return session, binding, grant_id
 
 
@@ -192,6 +192,7 @@ def prepare(cluster, a, b):
             xid xid8 NOT NULL, claims jsonb NOT NULL,
             resource text NOT NULL DEFAULT 'd35.data', command text NOT NULL DEFAULT 'SELECT',
             expires_at timestamptz NOT NULL DEFAULT (statement_timestamp()+interval '5 minutes'),
+            revoked_at timestamptz,
             PRIMARY KEY(db,login,instance_start,pid,backend_start,xid));
         ALTER TABLE d35.evidence ENABLE ROW LEVEL SECURITY;
         ALTER TABLE d35.evidence FORCE ROW LEVEL SECURITY;
@@ -203,8 +204,11 @@ def prepare(cluster, a, b):
                                WHERE a.pid=pg_catalog.pg_backend_pid())
             AND xid=pg_catalog.pg_current_xact_id()
             AND pg_catalog.current_setting('transaction_isolation')='read committed'
-            AND expires_at>pg_catalog.statement_timestamp());
+            AND expires_at>pg_catalog.statement_timestamp() AND revoked_at IS NULL);
         CREATE POLICY trusted_emission ON d35.evidence FOR INSERT TO d35_issuer WITH CHECK(true);
+        CREATE POLICY issuer_lookup ON d35.evidence FOR SELECT TO d35_issuer USING(true);
+        CREATE POLICY issuer_revocation ON d35.evidence FOR UPDATE TO d35_issuer
+            USING(revoked_at IS NULL) WITH CHECK(revoked_at IS NOT NULL);
         ALTER TABLE d35.data ENABLE ROW LEVEL SECURITY;
         ALTER TABLE d35.data FORCE ROW LEVEL SECURITY;
         CREATE POLICY authorized_read ON d35.data FOR SELECT TO d35_runtime USING(EXISTS(
@@ -217,6 +221,7 @@ def prepare(cluster, a, b):
         GRANT USAGE ON SCHEMA d35 TO d35_runtime,d35_issuer;
         GRANT SELECT ON d35.data,d35.evidence TO d35_runtime;
         GRANT INSERT ON d35.evidence TO d35_issuer;
+        GRANT SELECT(grant_id,revoked_at), UPDATE(revoked_at) ON d35.evidence TO d35_issuer;
         RESET ROLE;
     """)
     for role in ('d35_runtime', 'd35_issuer'):
@@ -251,7 +256,7 @@ def visible(session, where=''):
 
 
 def scenario(cluster):
-    """The sole scenario: positive A, hostile SQL with live B evidence, same-backend replay."""
+    """One scenario: D3.5 controls, then committed revocation inside B's original transaction."""
     a, b = synthetic_claims(), synthetic_claims()
     prepare(cluster, a, b)
     with ExitStack() as stack:
@@ -265,6 +270,7 @@ def scenario(cluster):
             AND has_schema_privilege(session_user,'d35','USAGE')
             AND row_security_active('d35.data') AND row_security_active('d35.evidence')
             AND NOT has_table_privilege(session_user,'d35.evidence','INSERT,UPDATE,DELETE,TRUNCATE')
+            AND NOT has_any_column_privilege(session_user,'d35.evidence','UPDATE')
             AND NOT has_schema_privilege(session_user,'d35','CREATE')
             AND NOT has_schema_privilege(session_user,'public','CREATE')
             AND NOT has_database_privilege(session_user,current_database(),'CREATE,TEMPORARY')
@@ -306,6 +312,40 @@ def scenario(cluster):
               and visible(ca) == [], 'new transaction cannot reuse old evidence, even with identical selectors')
         check(ca.value('SELECT to_json(1);') == 1, 'replay query completed normally, not in aborted transaction')
         ca.execute('COMMIT;')
+
+        # B is still in its original transaction: no COMMIT/ROLLBACK/reconnect or new admission.
+        check(cb.value(BINDING) == binding_b
+              and cb.value("SELECT to_json(current_setting('transaction_isolation'));") == 'read committed'
+              and visible(cb) == ['B-only-marker'], 'B is authorized in its original READ COMMITTED transaction')
+        issuer = coordinator.emitter.value(
+            "SELECT json_build_object('login',session_user::text,'pid',pg_backend_pid());")
+        check(issuer['login'] == 'd35_issuer' and issuer['pid'] != binding_b['pid'],
+              'revocation uses the existing independent trusted issuer connection')
+        revoked = coordinator.emitter.execute(
+            'BEGIN; WITH changed AS (UPDATE d35.evidence SET revoked_at=statement_timestamp() '
+            'WHERE grant_id=' + literal(grant_b) + ' AND revoked_at IS NULL RETURNING grant_id) '
+            'SELECT count(*)::int FROM changed; COMMIT;')
+        check(revoked == ['1'], 'issuer updated exactly one B evidence row and COMMIT completed')
+        # This is B's first SQL statement after the independent COMMIT; selectors are unchanged.
+        check(visible(cb) == [], 'next B read in original open transaction returns zero rows after revocation')
+        check(cb.value(BINDING) == binding_b
+              and cb.value("SELECT to_json(current_setting('transaction_isolation'));") == 'read committed',
+              'B retains the same connection, backend, xid8 and READ COMMITTED after denial')
+        stored_b = json.loads(cluster.query(
+            "SELECT json_build_object('stored',count(*)::int,'revoked',bool_and(revoked_at IS NOT NULL),"
+            "'unexpired',bool_and(expires_at>statement_timestamp()),'same_claims',bool_and(claims="
+            + literal(json.dumps(b)) + "::jsonb),'business_rows',(SELECT count(*)::int FROM d35.data "
+            'WHERE tenant_id=' + literal(b['ls.tenant_id']) + " AND payload='B-only-marker')) "
+            'FROM d35.evidence WHERE grant_id=' + literal(grant_b)))
+        check(stored_b == {'stored': 1, 'revoked': True, 'unexpired': True,
+                           'same_claims': True, 'business_rows': 1},
+              'admin confirms B data and original evidence persist; evidence is revoked, not expired or deleted')
+        set_selectors(cb, b)
+        check(visible(cb) == [] and cb.value(
+            'SELECT count(*)::int FROM d35.evidence WHERE grant_id=' + literal(grant_b) + ';') == 0,
+              'restoring all nine B GUCs and selecting its grant cannot restore revoked authorization')
+        check(cb.value(BINDING) == binding_b and cb.value('SELECT to_json(1);') == 1,
+              'B transaction is still original and healthy after GUC restoration; no hidden SQL error')
         cb.execute('ROLLBACK;')
 
 
@@ -318,7 +358,8 @@ def main():
     with socket.socket() as probe:
         probe.settimeout(1)
         check(probe.connect_ex(('127.0.0.1', port)) != 0, 'temporary listener closed')
-    print('PASS D3.5: one scenario; positive A, hostile SQL denied, prior evidence not reusable; cleanup verified.')
+    print('PASS D3.6: one expanded scenario; D3.5 controls preserved; B revoked between statements '
+          'in its original READ COMMITTED transaction; cleanup verified.')
 
 
 if __name__ == '__main__':
@@ -327,5 +368,5 @@ if __name__ == '__main__':
     except Exception as failure:
         # No raw SQL/credentials or server diagnostics; failed preparation must fail CI.
         reason = str(failure) if isinstance(failure, AssertionError) else type(failure).__name__
-        print('FAIL D3.5:', reason, flush=True)
+        print('FAIL D3.6:', reason, flush=True)
         raise SystemExit(1) from None
