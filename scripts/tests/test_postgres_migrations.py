@@ -104,7 +104,7 @@ class Cluster:
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             self.port = listener.getsockname()[1]
-        if self.port == 5432:
+        if self.port in (5432, 55432):
             raise RuntimeError('Refusing shared-server port')
 
     def executable(self, name):
@@ -734,6 +734,8 @@ def main():
         test_catalog_service(cluster)
         from postgres_catalog_backend_contract import test_catalog_backend
         test_catalog_backend(cluster)
+        from postgres_credential_verifier_contract import test_credential_verifier
+        test_credential_verifier(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
