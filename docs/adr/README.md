@@ -46,5 +46,6 @@ de [arquitectura modular](../architecture/modules.md) cuando cambie una decisió
 | [0002 — PostgreSQL y conectividad](0002-postgresql-y-conectividad.md) | Aceptado | 2026-10-16 | Desarrollo local y JDBC opcional |
 | [0003 — Calidad, CI y flujo Git](0003-calidad-ci-y-flujo-git.md) | Aceptado | 2026-10-16 | Verificación implementada y política Git/Jira acordada |
 | [0004 — Migraciones administrativas](0004-migraciones-administrativas.md) | Propuesto | 2026-10-16 | Flyway explícito y separación de privilegios LFD-25; modelo de tablas pendiente |
+| [0005 — Frontera de confianza y autorización RLS](0005-frontera-confianza-rls.md) | Propuesto | 2026-10-20 | Amenazas HTTP/SQL, evidencia protegida, lectura previa y frescura; sin autorización de implementación |
 
 Ver también la [guía Codex](../codex/README.md) y el [README del proyecto](../../README.md).
