@@ -10,6 +10,22 @@ const response = (items: unknown[]) => ({ ok: true, json: async () => items }) a
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 describe('Connected global catalog', () => {
+  it('labels the real catalog context and preserves preview labels elsewhere', async () => {
+    vi.stubEnv('DEV', true); vi.stubEnv('VITE_CATALOG_ENABLED', 'true')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response([]))
+    render(<App />)
+    expect(screen.getByText('Previsualización visual')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Aplicaciones' }))
+    expect(screen.getByText('Previsualización visual')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Abrir catálogo global conectado/ }))
+    expect(screen.getByText('Catálogo real · Solo lectura')).toBeInTheDocument()
+    expect(screen.queryByText('Previsualización visual')).not.toBeInTheDocument()
+    await screen.findByText('Sin resultados en esta página del catálogo.')
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a Aplicaciones de muestra' }))
+    expect(screen.getByText('Previsualización visual')).toBeInTheDocument()
+    expect(screen.queryByText('Catálogo real · Solo lectura')).not.toBeInTheDocument()
+  })
+
   it('is disabled by default and absent from production even with the flag', () => {
     const fetchRequest = vi.spyOn(globalThis, 'fetch')
     vi.stubEnv('VITE_CATALOG_ENABLED', 'false')

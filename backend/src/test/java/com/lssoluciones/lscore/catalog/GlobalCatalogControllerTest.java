@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -54,9 +55,10 @@ class GlobalCatalogControllerTest {
         when(reader.applications(100, 0)).thenReturn(List.of(
                 new GlobalCatalogReader.Application(id, "ls-core", "LS Core", "Catalog", "PUBLISHED")));
         mvc.perform(get("/api/global-catalog/applications"))
-                .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("LS Core")));
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("LS Core")));
         mvc.perform(get("/api/global-catalog/applications/" + id + "/modules?limit=1&offset=10000"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"));
         verify(reader).modules(id, 1, 10000);
         mvc.perform(post("/api/global-catalog/applications")).andExpect(status().isMethodNotAllowed());
         mvc.perform(get("/api/global-catalog/users")).andExpect(status().isNotFound());
@@ -68,9 +70,11 @@ class GlobalCatalogControllerTest {
         var mvc = MockMvcBuilders.standaloneSetup(new GlobalCatalogController(reader, local())).build();
         for (String query : List.of("limit=0", "limit=101", "offset=-1", "offset=10001", "limit=bad", "offset=99999999999")) {
             mvc.perform(get("/api/global-catalog/applications?" + query)).andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"))
                     .andExpect(content().json("{\"error\":\"Invalid catalog request\"}"));
         }
-        mvc.perform(get("/api/global-catalog/applications/invalid/modules")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/global-catalog/applications/invalid/modules")).andExpect(status().isBadRequest())
+                .andExpect(header().string("Cache-Control", "no-store"));
         verifyNoInteractions(reader);
     }
 
@@ -78,10 +82,16 @@ class GlobalCatalogControllerTest {
     void unavailableHasNoJdbcDetailsAndCorsIsNotOpen() throws Exception {
         var reader = mock(GlobalCatalogReader.class);
         when(reader.applications(100, 0)).thenThrow(GlobalCatalogReader.CatalogUnavailableException.class);
+        UUID id = UUID.fromString("3bc09866-f9f0-573c-82a0-fd72ec6be41f");
+        when(reader.modules(id, 100, 0)).thenThrow(GlobalCatalogReader.CatalogUnavailableException.class);
         var mvc = MockMvcBuilders.standaloneSetup(new GlobalCatalogController(reader, local())).build();
         var response = mvc.perform(get("/api/global-catalog/applications").header("Origin", "https://external.example"))
                 .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(content().json("{\"error\":\"Global catalog unavailable\"}")).andReturn().getResponse();
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isNull();
+        mvc.perform(get("/api/global-catalog/applications/" + id + "/modules"))
+                .andExpect(status().isServiceUnavailable()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(content().json("{\"error\":\"Global catalog unavailable\"}"));
     }
 }

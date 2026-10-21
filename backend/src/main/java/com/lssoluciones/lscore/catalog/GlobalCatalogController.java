@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,17 +33,19 @@ public class GlobalCatalogController {
     }
 
     @GetMapping("/api/global-catalog/applications")
-    public List<GlobalCatalogReader.Application> applications(
+    public ResponseEntity<List<GlobalCatalogReader.Application>> applications(
             @RequestParam(name = "limit", defaultValue = "100") String limit,
             @RequestParam(name = "offset", defaultValue = "0") String offset) {
-        return reader.applications(page(limit, 1, 100), page(offset, 0, 10000));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(reader.applications(page(limit, 1, 100), page(offset, 0, 10000)));
     }
 
     @GetMapping("/api/global-catalog/applications/{applicationId}/modules")
-    public List<GlobalCatalogReader.Module> modules(@PathVariable("applicationId") String applicationId,
+    public ResponseEntity<List<GlobalCatalogReader.Module>> modules(@PathVariable("applicationId") String applicationId,
             @RequestParam(name = "limit", defaultValue = "100") String limit,
             @RequestParam(name = "offset", defaultValue = "0") String offset) {
-        return reader.modules(UUID.fromString(applicationId), page(limit, 1, 100), page(offset, 0, 10000));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(reader.modules(UUID.fromString(applicationId), page(limit, 1, 100), page(offset, 0, 10000)));
     }
 
     private static int page(String value, int minimum, int maximum) {
@@ -55,11 +58,13 @@ public class GlobalCatalogController {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> invalidRequest() {
-        return ResponseEntity.badRequest().body(Map.of("error", "Invalid catalog request"));
+        return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
+                .body(Map.of("error", "Invalid catalog request"));
     }
 
     @ExceptionHandler(GlobalCatalogReader.CatalogUnavailableException.class)
     public ResponseEntity<Map<String, String>> unavailable() {
-        return ResponseEntity.status(503).body(Map.of("error", "Global catalog unavailable"));
+        return ResponseEntity.status(503).cacheControl(CacheControl.noStore())
+                .body(Map.of("error", "Global catalog unavailable"));
     }
 }
