@@ -1,4 +1,4 @@
-"""D3.5/D3.6: one operation-evidence scenario, executed once by the PG17 CI job.
+"""D3.5-D3.7: one operation-evidence scenario, executed once by the PG17 CI job.
 
 Only standard-library Python and psql; disposable_cluster owns creation/cleanup.
 No external endpoint, production migration, authenticator or test suite is invoked.
@@ -153,6 +153,9 @@ class Coordinator:
                        if hmac.compare_digest(token, credential)), None)
         if claims is None or handle not in self.owned:
             raise AssertionError('No authenticated synthetic admission')
+        check(self.emitter.value("SELECT to_json(status='ACTIVE') FROM d35.tenants WHERE id="
+                                 + literal(claims['ls.tenant_id']) + ';') is True,
+              'trusted issuer reads ACTIVE authoritative tenant before fixture emission')
         session = self.owned[handle]
         binding = session.value(BINDING)  # Native query on the exclusively owned connection.
         if binding['login'] != 'd35_runtime' or not binding['backend_start']:
@@ -183,7 +186,8 @@ def prepare(cluster, a, b):
         REVOKE CREATE ON SCHEMA public FROM PUBLIC;
         CREATE SCHEMA d35 AUTHORIZATION d35_owner;
         SET ROLE d35_owner;
-        CREATE TABLE d35.tenants(id uuid PRIMARY KEY, label text NOT NULL);
+        CREATE TABLE d35.tenants(id uuid PRIMARY KEY, label text NOT NULL,
+                                status text NOT NULL CHECK(status IN ('ACTIVE','SUSPENDED')));
         CREATE TABLE d35.data(tenant_id uuid PRIMARY KEY REFERENCES d35.tenants(id),
                               application_id uuid NOT NULL, branch_id uuid NOT NULL, payload text NOT NULL);
         CREATE TABLE d35.evidence(
@@ -209,6 +213,11 @@ def prepare(cluster, a, b):
         CREATE POLICY issuer_lookup ON d35.evidence FOR SELECT TO d35_issuer USING(true);
         CREATE POLICY issuer_revocation ON d35.evidence FOR UPDATE TO d35_issuer
             USING(revoked_at IS NULL) WITH CHECK(revoked_at IS NOT NULL);
+        ALTER TABLE d35.tenants ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE d35.tenants FORCE ROW LEVEL SECURITY;
+        CREATE POLICY source_read ON d35.tenants FOR SELECT TO d35_issuer USING(true);
+        CREATE POLICY source_suspension ON d35.tenants FOR UPDATE TO d35_issuer
+            USING(status='ACTIVE') WITH CHECK(status='SUSPENDED');
         ALTER TABLE d35.data ENABLE ROW LEVEL SECURITY;
         ALTER TABLE d35.data FORCE ROW LEVEL SECURITY;
         CREATE POLICY authorized_read ON d35.data FOR SELECT TO d35_runtime USING(EXISTS(
@@ -221,7 +230,8 @@ def prepare(cluster, a, b):
         GRANT USAGE ON SCHEMA d35 TO d35_runtime,d35_issuer;
         GRANT SELECT ON d35.data,d35.evidence TO d35_runtime;
         GRANT INSERT ON d35.evidence TO d35_issuer;
-        GRANT SELECT(grant_id,revoked_at), UPDATE(revoked_at) ON d35.evidence TO d35_issuer;
+        GRANT SELECT(grant_id,revoked_at,claims), UPDATE(revoked_at) ON d35.evidence TO d35_issuer;
+        GRANT SELECT(id,status), UPDATE(status) ON d35.tenants TO d35_issuer;
         RESET ROLE;
     """)
     for role in ('d35_runtime', 'd35_issuer'):
@@ -233,12 +243,15 @@ def prepare(cluster, a, b):
                             "FROM pg_authid WHERE rolname=" + literal(role)) == 't', 'SCRAM verifier confirmed')
         cluster.query('ALTER ROLE ' + role + ' LOGIN')
     for scope, label in ((a, 'A'), (b, 'B')):
-        cluster.query('INSERT INTO d35.tenants VALUES (' + literal(scope['ls.tenant_id']) + ',' + literal(label) + ');'
+        cluster.query('INSERT INTO d35.tenants VALUES (' + literal(scope['ls.tenant_id']) + ','
+                      + literal(label) + ",'ACTIVE');"
                       'INSERT INTO d35.data VALUES (' + ','.join(map(literal, [scope['ls.tenant_id'],
                       scope['ls.application_id'], scope['ls.branch_id'], label + '-only-marker'])) + ');')
     check(cluster.query('SELECT count(*) FROM d35.tenants') == '2'
           and json.loads(cluster.query('SELECT json_agg(payload ORDER BY payload) FROM d35.data'))
           == ['A-only-marker', 'B-only-marker'], 'admin verifies two tenants and two nonempty physical rows')
+    check(json.loads(cluster.query('SELECT json_object_agg(label,status) FROM d35.tenants'))
+          == {'A': 'ACTIVE', 'B': 'ACTIVE'}, 'authoritative A and B sources start ACTIVE')
 
 
 def set_selectors(session, claims):
@@ -256,7 +269,7 @@ def visible(session, where=''):
 
 
 def scenario(cluster):
-    """One scenario: D3.5 controls, then committed revocation inside B's original transaction."""
+    """One scenario: D3.5/D3.6 controls with atomic authoritative suspension/invalidation."""
     a, b = synthetic_claims(), synthetic_claims()
     prepare(cluster, a, b)
     with ExitStack() as stack:
@@ -271,6 +284,8 @@ def scenario(cluster):
             AND row_security_active('d35.data') AND row_security_active('d35.evidence')
             AND NOT has_table_privilege(session_user,'d35.evidence','INSERT,UPDATE,DELETE,TRUNCATE')
             AND NOT has_any_column_privilege(session_user,'d35.evidence','UPDATE')
+            AND NOT has_table_privilege(session_user,'d35.tenants','INSERT,UPDATE,DELETE,TRUNCATE')
+            AND NOT has_any_column_privilege(session_user,'d35.tenants','INSERT,UPDATE')
             AND NOT has_schema_privilege(session_user,'d35','CREATE')
             AND NOT has_schema_privilege(session_user,'public','CREATE')
             AND NOT has_database_privilege(session_user,current_database(),'CREATE,TEMPORARY')
@@ -321,16 +336,37 @@ def scenario(cluster):
             "SELECT json_build_object('login',session_user::text,'pid',pg_backend_pid());")
         check(issuer['login'] == 'd35_issuer' and issuer['pid'] != binding_b['pid'],
               'revocation uses the existing independent trusted issuer connection')
-        revoked = coordinator.emitter.execute(
-            'BEGIN; WITH changed AS (UPDATE d35.evidence SET revoked_at=statement_timestamp() '
-            'WHERE grant_id=' + literal(grant_b) + ' AND revoked_at IS NULL RETURNING grant_id) '
-            'SELECT count(*)::int FROM changed; COMMIT;')
-        check(revoked == ['1'], 'issuer updated exactly one B evidence row and COMMIT completed')
+        authority_query = (
+            "SELECT json_build_object('A',(SELECT status FROM d35.tenants WHERE id="
+            + literal(a['ls.tenant_id']) + "),'B',(SELECT status FROM d35.tenants WHERE id="
+            + literal(b['ls.tenant_id']) + "),'A_revoked',(SELECT revoked_at IS NOT NULL FROM d35.evidence "
+            'WHERE grant_id=' + literal(grant_a) + "),'B_revoked',(SELECT revoked_at IS NOT NULL "
+            'FROM d35.evidence WHERE grant_id=' + literal(grant_b) + '));')
+        # One trusted connection/transaction; RETURNING links invalidation to the source actually changed.
+        check(coordinator.emitter.execute('BEGIN;') == [], 'authoritative change starts one trusted transaction')
+        changed = coordinator.emitter.value(
+            "WITH suspended AS (UPDATE d35.tenants SET status='SUSPENDED' WHERE id="
+            + literal(b['ls.tenant_id']) + " AND status='ACTIVE' RETURNING id), "
+            'invalidated AS (UPDATE d35.evidence SET revoked_at=statement_timestamp() '
+            "WHERE revoked_at IS NULL AND claims->>'ls.tenant_id' IN (SELECT id::text FROM suspended) "
+            "RETURNING grant_id) SELECT json_build_object('suspended',(SELECT count(*)::int FROM suspended),"
+            "'invalidated',(SELECT count(*)::int FROM invalidated));")
+        check(changed == {'suspended': 1, 'invalidated': 1},
+              'one B source changed and its dependent evidence invalidated before a single COMMIT')
+        # No retry or extra scenario: observe this same pending transaction from the admin channel.
+        check(json.loads(cluster.query(authority_query))
+              == {'A': 'ACTIVE', 'B': 'ACTIVE', 'A_revoked': False, 'B_revoked': False},
+              'independent observer sees neither uncommitted source change nor invalidation')
+        check(coordinator.emitter.execute('COMMIT;') == [],
+              'single COMMIT confirms authoritative B suspension and evidence invalidation together')
         # This is B's first SQL statement after the independent COMMIT; selectors are unchanged.
         check(visible(cb) == [], 'next B read in original open transaction returns zero rows after revocation')
         check(cb.value(BINDING) == binding_b
               and cb.value("SELECT to_json(current_setting('transaction_isolation'));") == 'read committed',
               'B retains the same connection, backend, xid8 and READ COMMITTED after denial')
+        check(json.loads(cluster.query(authority_query))
+              == {'A': 'ACTIVE', 'B': 'SUSPENDED', 'A_revoked': False, 'B_revoked': True},
+              'admin sees committed B suspension and revocation while A stays ACTIVE with evidence unrevoked')
         stored_b = json.loads(cluster.query(
             "SELECT json_build_object('stored',count(*)::int,'revoked',bool_and(revoked_at IS NOT NULL),"
             "'unexpired',bool_and(expires_at>statement_timestamp()),'same_claims',bool_and(claims="
@@ -358,8 +394,8 @@ def main():
     with socket.socket() as probe:
         probe.settimeout(1)
         check(probe.connect_ex(('127.0.0.1', port)) != 0, 'temporary listener closed')
-    print('PASS D3.6: one expanded scenario; D3.5 controls preserved; B revoked between statements '
-          'in its original READ COMMITTED transaction; cleanup verified.')
+    print('PASS D3.7: one expanded scenario; D3.5/D3.6 controls preserved; authoritative B suspension '
+          'and evidence invalidation committed atomically; A unaffected; cleanup verified.')
 
 
 if __name__ == '__main__':
@@ -368,5 +404,5 @@ if __name__ == '__main__':
     except Exception as failure:
         # No raw SQL/credentials or server diagnostics; failed preparation must fail CI.
         reason = str(failure) if isinstance(failure, AssertionError) else type(failure).__name__
-        print('FAIL D3.6:', reason, flush=True)
+        print('FAIL D3.7:', reason, flush=True)
         raise SystemExit(1) from None
