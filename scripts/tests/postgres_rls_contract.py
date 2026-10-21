@@ -120,6 +120,94 @@ def test_owner_dml(cluster, ids):
     check(data_snapshot(cluster, tables) == physical, 'all DML attempts leave physical A/B fixture unchanged')
 
 
+def test_deny_matrix(cluster, ids):
+    """D2: direct SQL under ACL denial and FORCE RLS, with attacker-controlled GUCs.
+
+    D1 supplies nonempty UPDATE/DELETE evidence for tenants/branches. Other protected
+    tables stay empty: zero affected rows there is not cross-tenant authorization proof.
+    DEFAULT VALUES probes the INSERT RLS gate, not business constraint validity.
+    """
+    physical = data_snapshot(cluster, sorted(PROTECTED | GLOBAL))
+    columns = {}
+    for table in sorted(PROTECTED):
+        columns[table] = cluster.query(
+            "SELECT quote_ident(attname) FROM pg_attribute "
+            f"WHERE attrelid='{table}'::regclass AND attnum>0 AND NOT attisdropped "
+            "ORDER BY attnum LIMIT 1")
+        check(cluster.query(
+            "SELECT c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user) "
+            "AND row_security_active(c.oid) "
+            "AND has_schema_privilege(current_user,c.relnamespace,'USAGE') "
+            "AND has_table_privilege(current_user,c.oid,'SELECT') "
+            "AND has_table_privilege(current_user,c.oid,'INSERT') "
+            "AND has_table_privilege(current_user,c.oid,'UPDATE') "
+            "AND has_table_privilege(current_user,c.oid,'DELETE') "
+            f"FROM pg_class c WHERE c.oid='{table}'::regclass", 'ls_core_migrator_dev') == 't',
+              table + ': D2 owner has DML ACLs and active FORCE RLS')
+    check(cluster.query(
+        "SELECT count(*) FROM pg_roles WHERE rolname IN "
+        "('ls_core_app_dev','ls_core_migrator_dev') AND "
+        "(rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication)") == '0'
+        and cluster.query(
+            "SELECT count(*) FROM pg_auth_members WHERE member IN "
+            "(SELECT oid FROM pg_roles WHERE rolname IN "
+            "('ls_core_app_dev','ls_core_migrator_dev'))") == '0',
+        'D2 runtime and owner have no bypass attributes or inherited role paths')
+    scenarios = [
+        ('unset', {}),
+        ('forged A', {'ls.tenant_id': ids['tenant.tenants'][0],
+                      'ls.branch_id': ids['tenant.branches'][0]}),
+        ('forged B', {'ls.tenant_id': ids['tenant.tenants'][1],
+                      'ls.branch_id': ids['tenant.branches'][1]}),
+        ('forged A/B mismatch', {'ls.tenant_id': ids['tenant.tenants'][0],
+                                 'ls.branch_id': ids['tenant.branches'][1]}),
+    ]
+    for label, selectors in scenarios:
+        settings = dict(selectors)
+        if settings:
+            settings.update({'ls.user_id': str(uuid4()), 'ls.session_id': str(uuid4()),
+                             'ls.is_admin': 'true'})
+        prefix = ''.join(f"SET {key}='{value}'; " for key, value in settings.items())
+        # Verify GUCs in the same physical session as each operation; none is trusted.
+        expected = ' AND '.join(
+            f"current_setting('{key}',true) IS NOT DISTINCT FROM "
+            + ("'" + settings[key] + "'" if key in settings else 'NULL')
+            for key in ['ls.tenant_id', 'ls.branch_id', 'ls.user_id', 'ls.session_id', 'ls.is_admin'])
+        prefix += f'SELECT 1 / (({expected})::integer); '
+        for table in sorted(PROTECTED):
+            if not settings and table in ids:
+                continue  # Existing D1 already covers these baseline operations.
+            column = columns[table]
+            statements = {
+                'SELECT': f'SELECT count(*) FROM {table}',
+                'INSERT': f'INSERT INTO {table} DEFAULT VALUES',
+                'UPDATE': f'WITH changed AS (UPDATE {table} SET {column}={column} '
+                          'RETURNING 1) SELECT count(*) FROM changed',
+                'DELETE': f'WITH changed AS (DELETE FROM {table} RETURNING 1) '
+                          'SELECT count(*) FROM changed',
+            }
+            for operation, statement in statements.items():
+                for role in ['ls_core_app_dev', 'ls_core_migrator_dev']:
+                    result = cluster.psql(script='-', reply='\\set VERBOSITY verbose\n'
+                                          + prefix + statement + ';\n', user=role)
+                    context = f'{label}: {table} {role} {operation}'
+                    if role == 'ls_core_app_dev':
+                        check(result.returncode != 0 and '42501' in result.stderr
+                              and 'permission denied' in result.stderr
+                              and 'row-level security' not in result.stderr,
+                              context + ': ACL denial (42501), not RLS')
+                    elif operation == 'INSERT':
+                        check(result.returncode != 0 and '42501' in result.stderr
+                              and 'row-level security' in result.stderr
+                              and 'permission denied' not in result.stderr,
+                              context + ': RLS denial (42501), not ACL/constraints')
+                    else:
+                        check(result.returncode == 0 and result.stdout.splitlines()[-1] == '0',
+                              context + ': FORCE RLS exposes/changes zero rows')
+        check(data_snapshot(cluster, sorted(PROTECTED | GLOBAL)) == physical,
+              label + ': administrator confirms all 29 physical tables unchanged')
+
+
 def test_rls(cluster):
     check(len(PROTECTED) == 22 and len(GLOBAL) == 7 and not PROTECTED & GLOBAL,
           'V9 independent contract: 22 protected and seven global tables')
@@ -161,6 +249,7 @@ def test_rls(cluster):
                             "(SELECT oid FROM pg_roles WHERE rolname='ls_core_app_dev')") == '0',
           'runtime has no superuser/BYPASSRLS or role memberships')
     test_owner_dml(cluster, ids)
+    test_deny_matrix(cluster, ids)
     # Administrator deletes only this fixture, child first; never broad DELETE/TRUNCATE.
     for table in ['tenant.branches', 'tenant.tenants']:
         predicate = 'id IN (' + ','.join("'" + value + "'" for value in ids[table]) + ')'
