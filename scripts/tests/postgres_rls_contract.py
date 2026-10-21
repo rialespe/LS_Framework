@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 from test_postgres_migrations import (
     ROOT, SOURCE, SCHEMAS, check, disposable_cluster, history, prepare_fixture,
 )
-from postgres_seed_contract import data_snapshot
+from postgres_seed_contract import APP, data_snapshot
 
 
 # Independent reviewed contract; never derive expectations from the migration under test.
@@ -208,6 +208,87 @@ def test_deny_matrix(cluster, ids):
               label + ': administrator confirms all 29 physical tables unchanged')
 
 
+def test_real_context_denied(cluster, ids):
+    """D3.1: forge LFD-28's nine real keys, never authenticated identities.
+
+    One complete SESSION pass covers all protected tables; variations use D1's
+    nonempty A/B tables only. LOCAL settings and probes share an explicit transaction.
+    """
+    keys = ('ls.tenant_id', 'ls.application_id', 'ls.branch_id', 'ls.origin',
+            'ls.actor_id', 'ls.credential_id', 'ls.session_context_id',
+            'ls.membership_id', 'ls.branch_membership_id')
+    session = dict(zip(keys, (ids['tenant.tenants'][0], APP, ids['tenant.branches'][0],
+                             'SESSION', *(str(uuid4()) for _ in range(5)))))
+    key_id = str(uuid4())
+    scenarios = [
+        ('SESSION complete', session, sorted(PROTECTED)),
+        ('API_KEY branch empty', dict(session, **{
+            'ls.origin': 'API_KEY', 'ls.actor_id': key_id, 'ls.credential_id': key_id,
+            'ls.branch_id': '', 'ls.session_context_id': '', 'ls.membership_id': '',
+            'ls.branch_membership_id': ''}), sorted(ids)),
+        ('SESSION A/B contradiction', dict(session, **{
+            'ls.branch_id': ids['tenant.branches'][1]}), sorted(ids)),
+        ('SESSION membership absent', {k: v for k, v in session.items()
+                                       if k != 'ls.membership_id'}, sorted(ids)),
+        ('SESSION origin changed only', dict(session, **{'ls.origin': 'API_KEY'}), sorted(ids)),
+    ]
+    physical = data_snapshot(cluster, sorted(PROTECTED | GLOBAL))
+    definitions = relations(cluster)
+    columns = {table: cluster.query(
+        "SELECT quote_ident(attname) FROM pg_attribute "
+        f"WHERE attrelid='{table}'::regclass AND attnum>0 AND NOT attisdropped "
+        "ORDER BY attnum LIMIT 1") for table in sorted(PROTECTED)}
+    for label, settings, tables in scenarios:
+        setup = ''.join(f"SELECT set_config('{k}','{v}',true);\n" for k, v in settings.items())
+        expected = ' AND '.join(
+            f"current_setting('{k}',true) IS NOT DISTINCT FROM "
+            + ("'" + settings[k] + "'" if k in settings else 'NULL') for k in keys)
+        for table in tables:
+            column = columns[table]
+            statements = {
+                'SELECT': f"SELECT 'D3_ROWS:' || count(*) FROM {table}",
+                'INSERT': f'INSERT INTO {table} DEFAULT VALUES',
+                'UPDATE': f'WITH changed AS (UPDATE {table} SET {column}={column} '
+                          "RETURNING 1) SELECT 'D3_ROWS:' || count(*) FROM changed",
+                'DELETE': f'WITH changed AS (DELETE FROM {table} RETURNING 1) '
+                          "SELECT 'D3_ROWS:' || count(*) FROM changed",
+            }
+            for operation, statement in statements.items():
+                for role in ['ls_core_app_dev', 'ls_core_migrator_dev']:
+                    # Only the probe may fail. Capture its SQLSTATE before ending the
+                    # transaction; rollback errors must not masquerade as RLS denial.
+                    script = ('\\set VERBOSITY verbose\nBEGIN;\n' + setup
+                              + f"SELECT 'D3_CONTEXT_OK' WHERE {expected};\n"
+                              + '\\set ON_ERROR_STOP off\n' + statement + ';\n'
+                              + '\\set d3_state :SQLSTATE\n\\set ON_ERROR_STOP on\n'
+                              + '\\if :ERROR\nROLLBACK;\n\\else\nCOMMIT;\n\\endif\n'
+                              + '\\echo D3_SQLSTATE :d3_state\n')
+                    result = cluster.psql(script='-', reply=script, user=role)
+                    lines = result.stdout.splitlines()
+                    context = f'D3.1 {label}: {table} {role} {operation}'
+                    denied = role == 'ls_core_app_dev' or operation == 'INSERT'
+                    check(result.returncode == 0 and lines.count('BEGIN') == 1
+                          and lines.count('D3_CONTEXT_OK') == 1
+                          and lines.count('ROLLBACK' if denied else 'COMMIT') == 1
+                          and lines.count('D3_SQLSTATE ' + ('42501' if denied else '00000')) == 1,
+                          context + ': nine keys verified in probe transaction; clean completion')
+                    if role == 'ls_core_app_dev':
+                        check('42501' in result.stderr and 'permission denied' in result.stderr
+                              and 'row-level security' not in result.stderr and '25P02' not in result.stderr,
+                              context + ': ACL denial, not RLS/constraint/aborted transaction')
+                    elif operation == 'INSERT':
+                        check('42501' in result.stderr and 'row-level security' in result.stderr
+                              and 'permission denied' not in result.stderr and '25P02' not in result.stderr,
+                              context + ': RLS denial, not ACL/constraint/aborted transaction')
+                    else:
+                        check(not result.stderr and lines.count('D3_ROWS:0') == 1,
+                              context + ': FORCE RLS exposes/changes zero rows')
+        check(data_snapshot(cluster, sorted(PROTECTED | GLOBAL)) == physical,
+              'D3.1 ' + label + ': administrator confirms all 29 physical tables unchanged')
+    check(relations(cluster) == definitions,
+          'D3.1 all 29 table owners, ACLs and ENABLE/FORCE flags unchanged')
+
+
 def test_rls(cluster):
     check(len(PROTECTED) == 22 and len(GLOBAL) == 7 and not PROTECTED & GLOBAL,
           'V9 independent contract: 22 protected and seven global tables')
@@ -250,6 +331,7 @@ def test_rls(cluster):
           'runtime has no superuser/BYPASSRLS or role memberships')
     test_owner_dml(cluster, ids)
     test_deny_matrix(cluster, ids)
+    test_real_context_denied(cluster, ids)
     # Administrator deletes only this fixture, child first; never broad DELETE/TRUNCATE.
     for table in ['tenant.branches', 'tenant.tenants']:
         predicate = 'id IN (' + ','.join("'" + value + "'" for value in ids[table]) + ')'
