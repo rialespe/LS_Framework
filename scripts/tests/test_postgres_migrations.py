@@ -736,6 +736,8 @@ def main():
         test_catalog_backend(cluster)
         from postgres_credential_verifier_contract import test_credential_verifier
         test_credential_verifier(cluster)
+        from postgres_identity_registration_contract import test_identity_registration
+        test_identity_registration(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
