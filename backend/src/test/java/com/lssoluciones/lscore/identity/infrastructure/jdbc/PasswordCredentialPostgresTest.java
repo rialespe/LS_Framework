@@ -18,7 +18,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.postgresql.ds.PGSimpleDataSource;
-import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder;
 import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder.SecretKeyFactoryAlgorithm;
 
@@ -86,12 +85,8 @@ class PasswordCredentialPostgresTest {
                 }
             }
 
-            // Use the existing production configuration as well as the real JDBC source.
-            var settings = new MockEnvironment().withProperty("LS_IDENTITY_DB_HOST", "127.0.0.1")
-                    .withProperty("LS_IDENTITY_DB_PORT", Integer.toString(login.getPortNumbers()[0]))
-                    .withProperty("LS_IDENTITY_DB_NAME", "ls_core_dev")
-                    .withProperty("LS_IDENTITY_DB_PASSWORD", System.getenv("LS_CREDENTIAL_TEST_PASSWORD"));
-            var verifier = new PasswordCredentialConfiguration().passwordCredentialVerifier(settings);
+            // Historical V10 primitive contract only; V13 retires this LOGIN for production authentication.
+            var verifier = new PasswordCredentialVerifier(new JdbcPasswordCredentialSource(login), Clock.systemUTC());
             assertEquals(ACTIVE, verifier.verify("  F04-ACTIVE  ", password.toCharArray()));
             rejected(verifier, "f04-active", "incorrect");
             for (String username : new String[] {"missing", "f04-suspended", "f04-expired",
