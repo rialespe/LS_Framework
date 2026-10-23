@@ -24,7 +24,7 @@ public class PasswordLifecycleConfiguration {
                 Duration.ofHours(hours));
     }
 
-    private static PGSimpleDataSource source(Environment environment, String prefix, String role) {
+    static PGSimpleDataSource source(Environment environment, String prefix, String role) {
         var source = new PGSimpleDataSource();
         source.setServerNames(new String[] {required(environment, prefix + "HOST")});
         int port;

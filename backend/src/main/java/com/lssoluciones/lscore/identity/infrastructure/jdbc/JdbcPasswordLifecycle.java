@@ -12,7 +12,6 @@ import java.util.Objects;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder;
-import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder.SecretKeyFactoryAlgorithm;
 
 /**
  * Internal, trusted JDBC boundary. Dedicated LOGIN possession authorizes administration, never a caller UUID/GUC.
@@ -28,8 +27,7 @@ public final class JdbcPasswordLifecycle {
     private final DataSource changer;
     private final Duration temporaryValidity;
     private final SecureRandom random = new SecureRandom();
-    private final Pbkdf2PasswordEncoder encoder = new Pbkdf2PasswordEncoder(
-            "", 16, 600000, SecretKeyFactoryAlgorithm.PBKDF2WithHmacSHA256);
+    private final Pbkdf2PasswordEncoder encoder = PasswordCredentialVerifier.newEncoder();
 
     public JdbcPasswordLifecycle(DataSource issuer, DataSource changer, Duration temporaryValidity) {
         this.issuer = Objects.requireNonNull(issuer);
@@ -178,7 +176,7 @@ public final class JdbcPasswordLifecycle {
         }
     }
 
-    private static Instant databaseTime(Connection connection) throws SQLException {
+    static Instant databaseTime(Connection connection) throws SQLException {
         try (var statement = connection.createStatement()) {
             statement.setQueryTimeout(5);
             try (var rows = statement.executeQuery("SELECT clock_timestamp()")) {
@@ -192,7 +190,7 @@ public final class JdbcPasswordLifecycle {
         return hash != null && hash.matches("\\{pbkdf2-sha256-600000\\}[0-9a-f]{96}");
     }
 
-    private static boolean validPassword(char[] value) {
+    static boolean validPassword(char[] value) {
         if (value == null || value.length < 8 || value.length > 1024) {
             return false;
         }
@@ -207,7 +205,7 @@ public final class JdbcPasswordLifecycle {
         return letter && number && symbol;
     }
 
-    private static void begin(Connection connection, String role) throws SQLException {
+    static void begin(Connection connection, String role) throws SQLException {
         connection.setReadOnly(false);
         connection.setAutoCommit(false);
         connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);

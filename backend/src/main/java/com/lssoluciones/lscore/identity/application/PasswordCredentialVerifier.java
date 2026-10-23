@@ -10,10 +10,10 @@ import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder;
 import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder.SecretKeyFactoryAlgorithm;
 
 /**
- * Real password verification only: no session, token, AuthenticatedIdentity or enterprise authorization.
+ * Low-level password verification primitive (not an authentication entry point): no session, token, AuthenticatedIdentity or enterprise authorization.
  * Username normalization belongs to PostgreSQL; passwords are compared literally.
  * Only ACTIVE identities with usable, unexpired credentials can match. Unknown states fail closed.
- * Required password changes are denied until the separate change-password flow exists.
+ * Required password changes are denied; exchange and renewal use the separate V12 lifecycle.
  * Checks the source snapshot and decision-time expiry, without promising concurrent-state revocation.
  */
 public final class PasswordCredentialVerifier {
@@ -22,13 +22,17 @@ public final class PasswordCredentialVerifier {
     private static final Pattern HASH = Pattern.compile("\\{pbkdf2-sha256-600000\\}[0-9a-f]{96}");
     private final PasswordCredentialSource source;
     private final Clock clock;
-    private final Pbkdf2PasswordEncoder encoder = new Pbkdf2PasswordEncoder(
-            "", 16, 600000, SecretKeyFactoryAlgorithm.PBKDF2WithHmacSHA256);
+    private final Pbkdf2PasswordEncoder encoder = newEncoder();
     private final String dummyHash = encoder.encode(UUID.randomUUID().toString());
 
     public PasswordCredentialVerifier(PasswordCredentialSource source, Clock clock) {
         this.source = Objects.requireNonNull(source);
         this.clock = Objects.requireNonNull(clock);
+    }
+
+    /** Shared versioned storage encoding for issuance, renewal and recovery. */
+    public static Pbkdf2PasswordEncoder newEncoder() {
+        return new Pbkdf2PasswordEncoder("", 16, 600000, SecretKeyFactoryAlgorithm.PBKDF2WithHmacSHA256);
     }
 
     /**
@@ -40,14 +44,22 @@ public final class PasswordCredentialVerifier {
                 || password == null || password.length == 0 || password.length > 1024) {
             throw new CredentialRejectedException();
         }
+        PasswordCredentialSource.Credential credential;
+        try {
+            credential = source.findByUsername(username).orElse(null);
+        } catch (RuntimeException unavailable) {
+            credential = null;
+        }
+        return verifySnapshot(credential, password);
+    }
+
+    /** Low-level KDF primitive only. Future authentication callers MUST use PasswordAuthentication instead. */
+    public UUID verifySnapshot(PasswordCredentialSource.Credential credential, char[] password) {
+        if (password == null || password.length == 0 || password.length > 1024) {
+            throw new CredentialRejectedException();
+        }
         char[] copy = password.clone();
         try {
-            PasswordCredentialSource.Credential credential;
-            try {
-                credential = source.findByUsername(username).orElse(null);
-            } catch (RuntimeException unavailable) {
-                credential = null;
-            }
             boolean supported = credential != null && credential.passwordHash() != null
                     && HASH.matcher(credential.passwordHash()).matches();
             String hash = supported ? credential.passwordHash().substring(HASH_PREFIX.length()) : dummyHash;
