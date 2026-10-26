@@ -742,6 +742,8 @@ def main():
         test_password_lifecycle(cluster)
         from postgres_password_recovery_contract import test_password_recovery
         test_password_recovery(cluster)
+        from postgres_tenant_authorization_contract import test_tenant_authorization
+        test_tenant_authorization(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
