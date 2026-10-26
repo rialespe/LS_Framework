@@ -21,11 +21,15 @@ public class TenantAuthorizationConfiguration {
         if (!(authentication instanceof JdbcPasswordAuthentication jdbcAuthentication)) {
             throw new IllegalStateException("Transactional F04 authentication required");
         }
+        return new JdbcTenantAuthorization(database(environment, "LS_AUTHORIZATION_DB_", JdbcTenantAuthorization.ROLE), jdbcAuthentication);
+    }
+
+    static PGSimpleDataSource database(Environment environment, String prefix, String role) {
         var source = new PGSimpleDataSource();
-        source.setServerNames(new String[] {required(environment, "LS_AUTHORIZATION_DB_HOST")});
+        source.setServerNames(new String[] {required(environment, prefix + "HOST")});
         int port;
         try {
-            port = Integer.parseInt(required(environment, "LS_AUTHORIZATION_DB_PORT"));
+            port = Integer.parseInt(required(environment, prefix + "PORT"));
         } catch (NumberFormatException failure) {
             throw new IllegalStateException("Invalid authorization port");
         }
@@ -33,13 +37,13 @@ public class TenantAuthorizationConfiguration {
             throw new IllegalStateException("Invalid authorization port");
         }
         source.setPortNumbers(new int[] {port});
-        source.setDatabaseName(required(environment, "LS_AUTHORIZATION_DB_NAME"));
-        source.setUser(JdbcTenantAuthorization.ROLE);
-        source.setPassword(required(environment, "LS_AUTHORIZATION_DB_PASSWORD"));
+        source.setDatabaseName(required(environment, prefix + "NAME"));
+        source.setUser(role);
+        source.setPassword(required(environment, prefix + "PASSWORD"));
         source.setApplicationName("ls-core-authorization-reader");
         source.setConnectTimeout(3);
         source.setSocketTimeout(5);
-        return new JdbcTenantAuthorization(source, jdbcAuthentication);
+        return source;
     }
 
     private static String required(Environment environment, String name) {

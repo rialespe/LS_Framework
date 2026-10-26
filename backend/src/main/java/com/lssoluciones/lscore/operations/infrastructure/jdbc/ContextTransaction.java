@@ -2,6 +2,8 @@ package com.lssoluciones.lscore.operations.infrastructure.jdbc;
 
 import com.lssoluciones.lscore.access.application.context.ContextRejectedException;
 import com.lssoluciones.lscore.access.application.context.ContextResolver.AuthorizedContext;
+import com.lssoluciones.lscore.access.application.context.OperationAdmission.AuthorizedAdmission;
+import java.util.UUID;
 import com.zaxxer.hikari.HikariDataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -34,22 +36,69 @@ public final class ContextTransaction {
         List<List<String>> query(String sql, List<String> parameters);
     }
 
+    @FunctionalInterface
+    public interface BranchAdmission {
+        AuthorizedAdmission admit(Connection ownedConnection) throws Exception;
+    }
+
+    public record BranchView(UUID id, UUID tenantId, String code, String name) { }
+
+    /** One fixed, bounded SELECT only; no caller-supplied SQL, cursor, JDBC resource or deferred result. */
+    public BranchView readBranch(BranchAdmission issuer) {
+        if (issuer == null) {
+            throw new ContextRejectedException();
+        }
+        AuthorizedAdmission[] bound = new AuthorizedAdmission[1];
+        List<BranchView> result = new ArrayList<>();
+        execute(null, queries -> {
+            var scope = bound[0].context().claims().scope();
+            var rows = queries.query("SELECT id,tenant_id,code,name FROM tenant.branches WHERE id=?::uuid AND tenant_id=?::uuid",
+                    List.of(scope.branchId().toString(), scope.tenantId().toString()));
+            if (rows.size() != 1 || !scope.branchId().toString().equals(rows.get(0).get(0))
+                    || !scope.tenantId().toString().equals(rows.get(0).get(1))) {
+                throw new ContextRejectedException();
+            }
+            var row = rows.get(0);
+            result.add(new BranchView(UUID.fromString(row.get(0)), UUID.fromString(row.get(1)), row.get(2), row.get(3)));
+        }, connection -> {
+            bound[0] = issuer.admit(connection);
+            return bound[0];
+        });
+        return result.getFirst();
+    }
+
     public void execute(AuthorizedContext context, Work work) {
-        if (context == null || work == null || running.get() != null) {
+        execute(context, work, null);
+    }
+
+    private void execute(AuthorizedContext context, Work work, BranchAdmission issuer) {
+        if (context == null && issuer == null || work == null || running.get() != null) {
             throw new ContextRejectedException();
         }
         running.set(true);
         Connection connection = null;
         ScopedQueries queries = null;
         boolean safe = false;
+        AuthorizedAdmission admission = null;
         try {
-            context.begin();
+            if (context != null) {
+                context.begin();
+            }
             connection = pool.getConnection();
             if (!connection.getAutoCommit() || !connection.isReadOnly()) {
                 throw new ContextRejectedException();
             }
             checkSettings(connection, null);
+            if (issuer != null) {
+                connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            }
             connection.setAutoCommit(false);
+            if (issuer != null) {
+                admission = issuer.admit(connection);
+                admission.verify(connection);
+                context = admission.context();
+                context.begin();
+            }
             // pgJDBC sends BEGIN before this first transactional statement.
             context.revalidate();
             List<String> values = values(context);
@@ -63,6 +112,9 @@ public final class ContextTransaction {
             queries = new ScopedQueries(connection, values);
             work.run(queries);
             queries.check();
+            if (admission != null) {
+                admission.verify(connection);
+            }
             context.revalidate();
             queries.open = false;
             connection.commit();
@@ -100,7 +152,13 @@ public final class ContextTransaction {
                 }
                 throw new ContextRejectedException();
             } finally {
-                running.remove();
+                try {
+                    if (admission != null) {
+                        admission.close();
+                    }
+                } finally {
+                    running.remove();
+                }
             }
         }
     }

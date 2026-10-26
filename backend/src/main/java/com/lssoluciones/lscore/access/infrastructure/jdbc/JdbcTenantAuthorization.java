@@ -14,7 +14,7 @@ import javax.sql.DataSource;
  * Internal context-selection query, separate from business SQL admission/execution.
  * F04 authenticates every invocation; its returned UUID is consumed here, never accepted from a client.
  * One READ COMMITTED SELECT provides coherent current evidence. A later change can invalidate the snapshot.
- * No session/API Key evidence is fabricated for ContextResolver; OperationAdmission remains inactive.
+ * No session/API Key evidence is fabricated. Only the trusted operation coordinator can use internal subject data.
  */
 public final class JdbcTenantAuthorization {
     public static final String ROLE = "ls_core_authorization_reader_dev";
@@ -24,7 +24,7 @@ public final class JdbcTenantAuthorization {
             + "AND NOT EXISTS(SELECT FROM pg_shdepend WHERE refclassid='pg_authid'::regclass "
             + "AND refobjid=r.oid AND deptype='o') FROM pg_roles r WHERE rolname=session_user";
     private static final String LOOKUP = "SELECT u.status,t.status,m.status,b.status,bm.status,a.status,ta.status,"
-            + "clock_timestamp() FROM identity.users u "
+            + "clock_timestamp(),m.id,bm.id FROM identity.users u "
             + "JOIN tenant.memberships m ON m.user_id=u.id AND m.tenant_id=? "
             + "JOIN tenant.tenants t ON t.id=m.tenant_id "
             + "JOIN catalog.tenant_applications ta ON ta.tenant_id=t.id AND ta.application_id=? "
@@ -90,10 +90,12 @@ public final class JdbcTenantAuthorization {
                 boolean eligible = eligible(rows.getString(1), rows.getString(2), rows.getString(3), rows.getString(4),
                         rows.getString(5), rows.getString(6), rows.getString(7));
                 Instant observedAt = rows.getTimestamp(8).toInstant();
+                UUID membership = rows.getObject(9, UUID.class);
+                UUID branchMembership = rows.getObject(10, UUID.class);
                 if (rows.next() || !eligible) {
                     return Decision.denied();
                 }
-                return new Decision(Outcome.ALLOWED, scope, observedAt);
+                return new Decision(Outcome.ALLOWED, scope, observedAt, user, membership, branchMembership);
             }
         }
     }
@@ -130,15 +132,33 @@ public final class JdbcTenantAuthorization {
         private final Outcome outcome;
         private final Scope scope;
         private final Instant observedAt;
+        private final UUID subject;
+        private final UUID membership;
+        private final UUID branchMembership;
 
-        private Decision(Outcome outcome, Scope scope, Instant observedAt) {
+        private Decision(Outcome outcome, Scope scope, Instant observedAt, UUID subject, UUID membership, UUID branchMembership) {
             this.outcome = outcome;
             this.scope = scope;
             this.observedAt = observedAt;
+            this.subject = subject;
+            this.membership = membership;
+            this.branchMembership = branchMembership;
         }
 
         private static Decision denied() {
-            return new Decision(Outcome.DENIED, null, null);
+            return new Decision(Outcome.DENIED, null, null, null, null, null);
+        }
+
+        UUID subject() {
+            return subject;
+        }
+
+        UUID membership() {
+            return membership;
+        }
+
+        UUID branchMembership() {
+            return branchMembership;
         }
 
         public Outcome outcome() {
