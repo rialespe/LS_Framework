@@ -56,7 +56,7 @@ class BranchOperationPostgresTest {
         return source;
     }
 
-    private PGSimpleDataSource role(String role) throws Exception {
+    PGSimpleDataSource role(String role) throws Exception {
         return source(role, System.getenv("LS_BRANCH_READ_TEST_" + role.toUpperCase(java.util.Locale.ROOT)));
     }
 
@@ -183,16 +183,16 @@ class BranchOperationPostgresTest {
     }
 
     @FunctionalInterface
-    private interface Attack {
+    interface Attack {
         void run(Connection connection) throws Exception;
     }
 
     /** Delegates all results to the real driver; inserts adversarial SQL before the one production SELECT. */
-    private static final class AttackingSource implements DataSource {
+    static final class AttackingSource implements DataSource {
         private final DataSource source;
         private final Attack attack;
 
-        private AttackingSource(DataSource source, Attack attack) {
+        AttackingSource(DataSource source, Attack attack) {
             this.source = source;
             this.attack = attack;
         }
@@ -259,7 +259,7 @@ class BranchOperationPostgresTest {
         }
     }
 
-    private record Snapshot(long database, long login, int pid, java.sql.Timestamp start, String xid,
+    record Snapshot(long database, long login, int pid, java.sql.Timestamp start, String xid,
             UUID tenant, UUID application, UUID branch, UUID actor, UUID membership, UUID access) {
         void bind(java.sql.PreparedStatement statement) throws SQLException {
             statement.setLong(1, database);
@@ -276,7 +276,7 @@ class BranchOperationPostgresTest {
         }
     }
 
-    private static Snapshot snapshot(Connection connection) throws SQLException {
+    static Snapshot snapshot(Connection connection) throws SQLException {
         try (var statement = connection.createStatement(); var rows = statement.executeQuery("SELECT database_oid,login_oid,backend_pid,backend_start,transaction_id::text,tenant_id,application_id,branch_id,actor_id,membership_id,branch_membership_id FROM security.branch_read_admissions")) {
             assertTrue(rows.next());
             return new Snapshot(rows.getLong(1), rows.getLong(2), rows.getInt(3), rows.getTimestamp(4), rows.getString(5),
@@ -284,14 +284,14 @@ class BranchOperationPostgresTest {
         }
     }
 
-    private static String scalar(Connection connection, String sql) throws SQLException {
+    static String scalar(Connection connection, String sql) throws SQLException {
         try (var statement = connection.createStatement(); var rows = statement.executeQuery(sql)) {
             assertTrue(rows.next());
             return rows.getString(1);
         }
     }
 
-    private static void deniedSql(Connection connection, String sql) throws SQLException {
+    static void deniedSql(Connection connection, String sql) throws SQLException {
         var savepoint = connection.setSavepoint();
         try (var statement = connection.createStatement()) {
             assertEquals("42501", assertThrows(SQLException.class, () -> statement.execute(sql)).getSQLState());

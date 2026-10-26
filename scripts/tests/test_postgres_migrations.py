@@ -744,8 +744,9 @@ def main():
         test_password_recovery(cluster)
         from postgres_tenant_authorization_contract import test_tenant_authorization
         test_tenant_authorization(cluster)
-        from postgres_branch_operation_contract import test_branch_operation
+        from postgres_branch_operation_contract import test_branch_operation, run_branch_integration
         test_branch_operation(cluster)
+        run_branch_integration(cluster, 'TenantIsolationPoolPostgresTest')
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
