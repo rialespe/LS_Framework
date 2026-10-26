@@ -3,13 +3,14 @@ package com.lssoluciones.lscore.access.application.context;
 import com.lssoluciones.lscore.access.application.context.ContextResolver.AuthorizedContext;
 import com.lssoluciones.lscore.access.application.context.TrustedContextSource.Origin;
 import com.lssoluciones.lscore.access.application.context.TrustedContextSource.Scope;
+import com.lssoluciones.lscore.access.infrastructure.jdbc.ProtectedBranchRead;
+import java.sql.Connection;
 import java.time.Clock;
 import java.util.Objects;
 
 /**
- * Inactive admission contract. No issuer/verifier, bean, adapter or successful issuance path.
- * Structural checks are not authentication. Every attempt currently fails closed.
- * Neither this contract nor its candidate records replace AuthorizedContext/ContextTransaction.
+ * Session/API Key candidates remain inactive. Only the bounded, protected password branch-read path is enabled.
+ * Public candidate records are never authority; physical PostgreSQL evidence is mandatory for branch reads.
  */
 public final class OperationAdmission {
     private final Clock clock;
@@ -24,6 +25,14 @@ public final class OperationAdmission {
 
     public AuthorizedAdmission apiKey(OperationIdentity operation, Scope expected, OperationEvidence.ApiKey evidence) {
         return reject(operation, expected, evidence, Origin.API_KEY);
+    }
+
+    public AuthorizedAdmission branchRead(OperationIdentity operation, Scope expected, ProtectedBranchRead evidence) {
+        require(operation != null);
+        operation.beginAdmission();
+        require(evidence != null && evidence.belongsTo(operation));
+        var context = ContextResolver.branchRead(evidence, expected);
+        return new AuthorizedAdmission(operation, context, evidence);
     }
 
     private AuthorizedAdmission reject(OperationIdentity operation, Scope expected,
@@ -46,17 +55,18 @@ public final class OperationAdmission {
     }
 
     /**
-     * Reserved output shape. Nothing can issue it in this increment.
-     * A future approved issuer must supply an existing AuthorizedContext and independently
-     * verified binding; private construction alone would not prove either property.
+     * Single-operation result, issued only after native PostgreSQL evidence verification.
+     * Not returned to clients. Closure invalidates the Java handle and removes the protected registry row.
      */
-    public static final class AuthorizedAdmission {
+    public static final class AuthorizedAdmission implements AutoCloseable {
         private final OperationIdentity operation;
         private final AuthorizedContext context;
+        private final ProtectedBranchRead evidence;
 
-        private AuthorizedAdmission(OperationIdentity operation, AuthorizedContext context) {
+        private AuthorizedAdmission(OperationIdentity operation, AuthorizedContext context, ProtectedBranchRead evidence) {
             this.operation = operation;
             this.context = context;
+            this.evidence = evidence;
         }
 
         public OperationIdentity operation() {
@@ -65,6 +75,15 @@ public final class OperationAdmission {
 
         public AuthorizedContext context() {
             return context;
+        }
+
+        public void verify(Connection connection) {
+            evidence.verify(connection);
+        }
+
+        @Override
+        public void close() {
+            evidence.close();
         }
     }
 }

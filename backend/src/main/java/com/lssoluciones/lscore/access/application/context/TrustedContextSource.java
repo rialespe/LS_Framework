@@ -8,7 +8,7 @@ public interface TrustedContextSource {
     /** Opaque evidence owned by a future authenticator; never implement from HTTP identifiers. */
     interface AuthenticatedIdentity { }
 
-    enum Origin { SESSION, API_KEY }
+    enum Origin { SESSION, API_KEY, PASSWORD_OPERATION }
 
     /** An explicit policy decision, not a database status vocabulary. */
     enum Validity { VERIFIED, DENIED, UNKNOWN }

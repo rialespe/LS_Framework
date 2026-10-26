@@ -6,6 +6,7 @@ import com.lssoluciones.lscore.access.application.context.TrustedContextSource.O
 import com.lssoluciones.lscore.access.application.context.TrustedContextSource.Scope;
 import com.lssoluciones.lscore.access.application.context.TrustedContextSource.SessionEvidence;
 import com.lssoluciones.lscore.access.application.context.TrustedContextSource.Validity;
+import com.lssoluciones.lscore.access.infrastructure.jdbc.ProtectedBranchRead;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
@@ -32,6 +33,23 @@ public final class ContextResolver {
     public AuthorizedContext apiKey(AuthenticatedIdentity identity, Scope expected) {
         require(identity != null && expected != null);
         return resolve(() -> validateKey(source.apiKey(identity), expected));
+    }
+
+    /** Password operation only: protected database evidence, without inventing sessions or VERIFIED records. */
+    public static AuthorizedContext branchRead(ProtectedBranchRead evidence, Scope expected) {
+        require(evidence != null && expected != null);
+        Supplier<Claims> validation = () -> {
+            Claims claims = evidence.verifiedClaims();
+            require(claims.origin() == Origin.PASSWORD_OPERATION && expected.equals(claims.scope())
+                    && claims.actorId() != null && claims.membershipId() != null && claims.branchMembershipId() != null
+                    && expected.branchId() != null && claims.credentialId() == null && claims.sessionContextId() == null);
+            return claims;
+        };
+        try {
+            return new AuthorizedContext(validation.get(), validation);
+        } catch (RuntimeException failure) {
+            throw new ContextRejectedException();
+        }
     }
 
     private AuthorizedContext resolve(Supplier<Claims> validation) {
