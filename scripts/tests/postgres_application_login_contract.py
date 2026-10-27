@@ -19,7 +19,10 @@ def test_application_login(cluster, test_class='ApplicationLoginPostgresTest'):
         print((migrated.stdout + migrated.stderr)[-5000:])
     check(migrated.returncode == 0, 'restricted migrator applies V16')
     check(cluster.flyway('validate', location=SOURCE, target='16').returncode == 0, 'Flyway validates V1-V16')
-    if test_class == 'MultidevicePostgresTest':
+    if test_class == 'PlatformOwnerPostgresTest':
+        from postgres_platform_owner_contract import test_platform_owner
+        test_platform_owner(cluster)
+    elif test_class == 'MultidevicePostgresTest':
         from postgres_multidevice_contract import test_multidevice
         test_multidevice(cluster)
     elif test_class != 'ApplicationLoginPostgresTest':

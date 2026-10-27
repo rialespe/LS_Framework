@@ -35,8 +35,8 @@ import org.springframework.core.env.MapPropertySource;
 
 /** Exactly one real HTTPS/PG17 flow; the client trusts only the owned temporary test certificate. */
 @EnabledIfEnvironmentVariable(named = "LS_LOGIN_TEST_ROOT", matches = ".+")
-class ApplicationLoginPostgresTest {
-    PGSimpleDataSource role(String user) throws Exception {
+public class ApplicationLoginPostgresTest {
+    public PGSimpleDataSource role(String user) throws Exception {
         Path root = Path.of(System.getenv("LS_LOGIN_TEST_ROOT")).toRealPath();
         assertEquals(Path.of(System.getProperty("java.io.tmpdir")).toRealPath(), root.getParent());
         assertTrue(root.getFileName().toString().startsWith("ls-core-migrations-test-"));
