@@ -7,6 +7,7 @@ import { ContextPreview } from './ContextPreview'
 import { SessionsPreview } from './SessionsPreview'
 import { GlobalPortalPreview } from './GlobalPortalPreview'
 import { ConnectedCatalog } from './ConnectedCatalog'
+import { ConnectedFiscal } from './ConnectedFiscal'
 import { DirectoryView } from './DirectoryView'
 import { descriptions, icons, sections } from './demo'
 import type { DemoItem, Section } from './demo'
@@ -20,6 +21,10 @@ type Preview = keyof typeof previews
 type NavigationSection = Section | Preview | 'Portal global (demo)' | 'Catálogo global (BD) · Solo lectura'
 
 export function App() {
+  return import.meta.env.DEV && import.meta.env.VITE_CONNECTED_PILOT === 'true' ? <ConnectedFiscal /> : <DemoApp />
+}
+
+function DemoApp() {
   const catalogEnabled = import.meta.env.DEV && import.meta.env.VITE_CATALOG_ENABLED === 'true'
   const [section, setSection] = useState<NavigationSection>('Dashboard')
   const [menuOpen, setMenuOpen] = useState(false)
