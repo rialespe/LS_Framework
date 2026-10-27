@@ -300,3 +300,15 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
   .session-activity { margin-left: 0; min-width: 0; flex-basis: 100%; }.session-device > button { width: 100%; }
   .session-actions > div { flex-direction: column; }
 }
+
+/* Connected pilot reuses the existing access/context/panel design. */
+.pilot-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.pilot-message { padding: 1rem 1.25rem; border-left: 4px solid var(--brand-blue); background: var(--surface); border-radius: .5rem; overflow-wrap: anywhere; }
+.pilot-confirm { margin-top: 1rem; }
+.pilot-results { margin-top: 1.5rem; }
+.pilot-list { list-style: none; padding: 0 1.5rem 1rem; margin: 0; }
+.pilot-list li { padding: 1rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.pilot-list small { display: block; color: var(--neutral-600); margin-top: .4rem; }
+.pilot-list p { color: var(--neutral-700); }
+.navigation button:disabled { cursor: not-allowed; opacity: .65; }
+@media (max-width: 640px) { .pilot-actions { width: 100%; } .pilot-actions .button { flex: 1; } }
