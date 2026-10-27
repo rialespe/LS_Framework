@@ -52,6 +52,8 @@ class PilotAccount {
             // Administrative fixture only. All later functional traffic uses the V16 restricted LOGIN.
             try (var admin = source("postgres").getConnection(); var sql = admin.createStatement()) {
                 sql.execute(Files.readString(Path.of(args[0]), StandardCharsets.UTF_8).replace("__USER__", user.toString()));
+                sql.execute("INSERT INTO tenant.administrators(tenant_id,membership_id,status,granted_at) "
+                        + "VALUES ('35000000-0000-0000-0000-000000000010','35000000-0000-0000-0000-000000000110','ACTIVE',clock_timestamp())");
             }
             System.out.println("Disposable pilot account and V17 context fixture prepared.");
         } catch (Exception failure) {

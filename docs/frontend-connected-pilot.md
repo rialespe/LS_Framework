@@ -1,8 +1,8 @@
 # LS Fiscal: primer frontend conectado local
 
 Adelanto técnico de F12, sin cerrar F12 ni cambiar Jira. El modo predeterminado sigue
-siendo DEMO. El piloto usa F04/V16/V17 y no habilita SQL empresarial, API Keys,
-multidevice ni administración.
+siendo DEMO. El piloto usa F04/V16–V18, incluye sesiones multidevice y revocación
+limitada por tenant; no habilita SQL empresarial, API Keys ni administración global.
 
 ## Preparar y abrir en Windows
 
@@ -52,7 +52,7 @@ python scripts/pilot/start_connected_pilot.py
 El lanzador reutiliza `disposable_cluster`, `prepare_fixture` y los scripts de roles
 existentes. No admite URL, credenciales ni directorio de un PostgreSQL existente.
 Inicializa PG17 nuevo en `%TEMP%`, en puerto efímero distinto de 5432 y 55432, y aplica
-y valida V1–V17 como migrador restringido. El administrador solo prepara la fixture.
+y valida V1–V18 como migrador restringido. El administrador solo prepara la fixture.
 
 Compila con `-DskipTests package dependency:build-classpath`, sin invocar integraciones
 históricas. `PilotAccount.java` usa el registrador y ciclo de contraseña de F04 para
@@ -62,7 +62,8 @@ roles, permisos y módulos exclusivamente del entorno desechable.
 
 Configura solo para los procesos hijos:
 
-- `ls.identity.credentials.enabled`, `ls.login.enabled` y `ls.login.contexts.enabled`: true.
+- `ls.identity.credentials.enabled`, `ls.login.enabled`, `ls.login.contexts.enabled`
+  y `ls.login.multidevice.enabled`: true.
 - Fiscal `35000000-0000-0000-0000-000000000001` y POS
   `35000000-0000-0000-0000-000000000002`, aplicaciones PUBLISHED de la fixture.
 - Canales F04/sesiones hacia el mismo PG17 efímero con los roles fijos
@@ -121,3 +122,6 @@ login, CSRF, empresas, contexto, permisos, navegación y logout mediante Vite co
 Spring/PG17 reales, y limpia al terminar. No sustituye la revisión visual manual del
 recorrido anterior. Las integraciones existentes siguen siendo la evidencia de
 seguridad del backend; el piloto no acredita uso productivo ni completa F12.
+
+El recorrido de **Mis sesiones**, revocación y administración limitada a Tenant 10
+está en [sessions-multidevice-lfd-36.md](sessions-multidevice-lfd-36.md).

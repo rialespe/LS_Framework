@@ -3,6 +3,8 @@ export type Branch = Tenant & { code: string }
 export type Permission = Branch & { resourceScope: string; moduleId: string | null }
 export type Module = Branch & { permissions: Permission[] }
 export type Context = { id: string; tenantId: string; branchId: string; applicationId: string; permissions: Permission[]; modules: Module[] }
+export type SessionEntry = { id: string; current: boolean; createdAt: string; lastSeenAt: string | null;
+  expiresAt: string; idleExpiresAt: string; status: 'ACTIVE' | 'REVOKED' | 'ABSOLUTE_EXPIRED' | 'IDLE_EXPIRED'; tenantRevoked: boolean }
 
 export class ApiFailure extends Error {
   constructor(readonly status: number) { super('Solicitud no disponible') }
@@ -57,6 +59,14 @@ async function csrf(): Promise<string> {
   if (token.headerName !== 'X-CSRF-TOKEN') { throw new ApiFailure(502) }
   return text(token.csrfToken)
 }
+function sessionEntry(value: unknown): SessionEntry {
+  const item = object(value)
+  const date = (value: unknown) => { const result = text(value); if (!Number.isFinite(Date.parse(result))) { throw new ApiFailure(502) } return result }
+  if (typeof item.current !== 'boolean' || typeof item.tenantRevoked !== 'boolean'
+    || !['ACTIVE', 'REVOKED', 'ABSOLUTE_EXPIRED', 'IDLE_EXPIRED'].includes(String(item.status))) { throw new ApiFailure(502) }
+  return { id: uuid(item.id), current: item.current, createdAt: date(item.createdAt), lastSeenAt: item.lastSeenAt === null ? null : date(item.lastSeenAt),
+    expiresAt: date(item.expiresAt), idleExpiresAt: date(item.idleExpiresAt), status: item.status as SessionEntry['status'], tenantRevoked: item.tenantRevoked }
+}
 async function post(path: string, body?: unknown) {
   const token = await csrf()
   return request(path, { method: 'POST', headers: { 'X-CSRF-TOKEN': token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -72,4 +82,15 @@ export const fiscalApi = {
   async select(tenantId: string, branchId: string) { return context(await post('context', { tenantId, branchId })) },
   async permissions() { return list(await request('permissions'), permission) },
   async navigation() { return list(await request('navigation'), module) },
+  async sessions(tenantId?: string) { return list(await request(tenantId ? `tenants/${encodeURIComponent(tenantId)}/sessions` : 'sessions'), sessionEntry) },
+  async revokeSession(id: string) { await post(`sessions/${encodeURIComponent(id)}/revoke`) },
+  async revokeOthers() { await post('sessions/revoke-others') },
+  async revokeTenantSession(tenant: string, id: string) { await post(`tenants/${encodeURIComponent(tenant)}/sessions/${encodeURIComponent(id)}/revoke`) },
+  async tenantAuthority(id: string) {
+    try {
+      const result = object(await request(`tenants/${encodeURIComponent(id)}/session-administration`))
+      if (typeof result.authorized !== 'boolean') { throw new ApiFailure(502) }
+      return result.authorized
+    } catch (error) { if (error instanceof ApiFailure && error.status === 404) { return false } throw error }
+  },
 }

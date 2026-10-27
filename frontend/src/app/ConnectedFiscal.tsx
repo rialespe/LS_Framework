@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Brand } from '../components/Brand'
 import { Icon } from '../components/Icon'
+import { ConnectedSessions } from './ConnectedSessions'
 import { ApiFailure, fiscalApi } from './fiscalApi'
-import type { Branch, Context, Module, Permission, Tenant } from './fiscalApi'
+import type { Branch, Context, Module, Permission, Tenant, SessionEntry } from './fiscalApi'
 
 type State = { phase: 'checking' | 'access' | 'workspace' | 'unavailable' | 'logout'; busy: boolean; message: string;
-  tenants: Tenant[]; branches: Branch[]; tenantId: string; branchId: string; context: Context | null; permissions: Permission[]; modules: Module[] }
-const empty: State = { phase: 'access', busy: false, message: '', tenants: [], branches: [], tenantId: '', branchId: '', context: null, permissions: [], modules: [] }
+  tenants: Tenant[]; branches: Branch[]; tenantId: string; branchId: string; context: Context | null; permissions: Permission[]; modules: Module[]; sessions: SessionEntry[]; sessionView: 'none' | 'mine' | 'tenant'; managementTenant: string; tenantAdmin: boolean }
+const empty: State = { phase: 'access', busy: false, message: '', tenants: [], branches: [], tenantId: '', branchId: '', context: null, permissions: [], modules: [], sessions: [], sessionView: 'none', managementTenant: '', tenantAdmin: false }
 
 async function selector(message = ''): Promise<State> {
   await fiscalApi.session()
@@ -14,12 +15,15 @@ async function selector(message = ''): Promise<State> {
 }
 async function confirmed(context: Context, tenants: Tenant[], branches: Branch[]): Promise<State> {
   if (!tenants.some(item => item.id === context.tenantId) || !branches.some(item => item.id === context.branchId)) { throw new ApiFailure(403) }
-  const [permissions, modules] = await Promise.all([fiscalApi.permissions(), fiscalApi.navigation()])
+  // Activity writes serialize requests for this cookie; avoid parallel connections for the same session.
+  const permissions = await fiscalApi.permissions()
+  const modules = await fiscalApi.navigation()
+  const tenantAdmin = await fiscalApi.tenantAuthority(context.tenantId)
   // Separate metadata endpoints cannot supply an atomic snapshot; discard if another tab changed selection.
   const latest = await fiscalApi.current()
   if (latest?.id !== context.id) { throw new ApiFailure(403) }
   return { ...empty, phase: 'workspace', tenants, branches, tenantId: context.tenantId, branchId: context.branchId,
-    context: latest, permissions, modules, message: 'Contexto confirmado por el servidor.' }
+    context: latest, permissions, modules, tenantAdmin, message: 'Contexto confirmado por el servidor.' }
 }
 async function restore(): Promise<State> {
   const available = await selector()
@@ -102,6 +106,21 @@ export function ConnectedFiscal() {
     setState({ ...empty, phase: 'logout', busy: true })
     void execute(async () => { await fiscalApi.logout(); return { ...empty, message: 'Sesión cerrada.' } }, 'logout')
   }
+  const showSessions = (tenantId = '') => {
+    const initial: State = { ...empty, phase: 'workspace', sessionView: tenantId ? 'tenant' : 'mine', managementTenant: tenantId }
+    setState({ ...initial, busy: true })
+    void execute(async () => ({ ...initial, sessions: await fiscalApi.sessions(tenantId || undefined) }), 'context')
+  }
+  const revoke = (id: string | null) => {
+    const initial: State = { ...empty, phase: 'workspace', sessionView: state.sessionView, managementTenant: state.managementTenant }
+    setState({ ...initial, busy: true })
+    void execute(async () => {
+      if (state.managementTenant && id) { await fiscalApi.revokeTenantSession(state.managementTenant, id) }
+      else if (id) { await fiscalApi.revokeSession(id) }
+      else { await fiscalApi.revokeOthers() }
+      return { ...initial, sessions: await fiscalApi.sessions(state.managementTenant || undefined), message: 'Revocación confirmada por el servidor.' }
+    }, 'context')
+  }
   const tenant = state.context ? state.tenants.find(item => item.id === state.context?.tenantId) : undefined
   const branch = state.context ? state.branches.find(item => item.id === state.context?.branchId) : undefined
 
@@ -118,7 +137,7 @@ export function ConnectedFiscal() {
     <div className="demo-banner"><span className="demo-label">CONECTADO</span><strong>LS Fiscal · Entorno local · Datos del backend · Sin operaciones empresariales</strong></div>
     <main className="main" id="main">
       <div className="page-heading"><div><p className="eyebrow">LS FISCAL / ACCESO Y CONTEXTO</p><h1>Tu espacio de trabajo.</h1><p>Accede y elige dónde trabajar con LS Soluciones.</p></div>
-        {state.phase === 'workspace' && <div className="pilot-actions"><button className="button" disabled={state.busy} onClick={() => { void refresh() }}>Actualizar sesión</button><button className="button" disabled={state.busy} onClick={logout}>Cerrar sesión</button></div>}
+        {state.phase === 'workspace' && <div className="pilot-actions"><button className="button" disabled={state.busy} onClick={() => showSessions()}>Mis sesiones</button>{state.tenantAdmin && state.context && <button className="button" disabled={state.busy} onClick={() => showSessions(state.context!.tenantId)}>Administrar sesiones de empresa</button>}<button className="button" disabled={state.busy} onClick={() => { void refresh() }}>Actualizar sesión</button><button className="button" disabled={state.busy} onClick={logout}>Cerrar sesión</button></div>}
       </div>
       {state.message && <p className="pilot-message" role="status">{state.message}</p>}
       {state.busy && <p role="status">Consultando el servidor…</p>}
@@ -132,7 +151,8 @@ export function ConnectedFiscal() {
           <p className="access-help">Utiliza la cuenta autorizada del entorno local. Las cookies de sesión son administradas por el navegador.</p>
         </form>
       </section>}
-      {state.phase === 'workspace' && <>
+      {state.phase === 'workspace' && state.sessionView !== 'none' && <ConnectedSessions key={state.sessionView + state.managementTenant} entries={state.sessions} busy={state.busy} tenant={state.sessionView === 'tenant'} onRefresh={() => showSessions(state.managementTenant)} onRevoke={id => revoke(id)} onRevokeOthers={() => revoke(null)} onLogout={logout} onBack={() => { void refresh() }} />}
+      {state.phase === 'workspace' && state.sessionView === 'none' && <>
         <section className="context-layout" aria-label="Selector de contexto">
           <div className="context-steps">
             <section className="preview-panel" aria-labelledby="pilot-company"><div className="preview-panel-heading"><span className="step-number">01</span><div><h2 id="pilot-company">Elige una empresa</h2><p>Empresas disponibles para esta sesión.</p></div></div>
