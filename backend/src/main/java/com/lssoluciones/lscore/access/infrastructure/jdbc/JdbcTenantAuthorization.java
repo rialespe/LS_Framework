@@ -23,15 +23,17 @@ public final class JdbcTenantAuthorization {
             + "AND rolconnlimit=3 AND NOT EXISTS(SELECT FROM pg_auth_members WHERE member=r.oid OR roleid=r.oid) "
             + "AND NOT EXISTS(SELECT FROM pg_shdepend WHERE refclassid='pg_authid'::regclass "
             + "AND refobjid=r.oid AND deptype='o') FROM pg_roles r WHERE rolname=session_user";
-    private static final String LOOKUP = "SELECT u.status,t.status,m.status,b.status,bm.status,a.status,ta.status,"
-            + "clock_timestamp(),m.id,bm.id FROM identity.users u "
-            + "JOIN tenant.memberships m ON m.user_id=u.id AND m.tenant_id=? "
+    /** Shared relationship graph for internal password/session metadata readers; conveys no identity. */
+    public static final String CONTEXT_RELATIONSHIPS = "FROM identity.users u "
+            + "JOIN tenant.memberships m ON m.user_id=u.id "
             + "JOIN tenant.tenants t ON t.id=m.tenant_id "
-            + "JOIN catalog.tenant_applications ta ON ta.tenant_id=t.id AND ta.application_id=? "
+            + "JOIN catalog.tenant_applications ta ON ta.tenant_id=t.id "
             + "JOIN catalog.applications a ON a.id=ta.application_id "
-            + "JOIN tenant.branches b ON b.id=? AND b.tenant_id=t.id "
-            + "JOIN tenant.branch_memberships bm ON bm.tenant_id=t.id AND bm.membership_id=m.id AND bm.branch_id=b.id "
-            + "WHERE u.id=? LIMIT 2";
+            + "JOIN tenant.branches b ON b.tenant_id=t.id "
+            + "JOIN tenant.branch_memberships bm ON bm.tenant_id=t.id AND bm.membership_id=m.id AND bm.branch_id=b.id ";
+    private static final String LOOKUP = "SELECT u.status,t.status,m.status,b.status,bm.status,a.status,ta.status,"
+            + "clock_timestamp(),m.id,bm.id " + CONTEXT_RELATIONSHIPS
+            + "WHERE t.id=? AND a.id=? AND b.id=? AND u.id=? LIMIT 2";
     private final DataSource source;
     private final JdbcPasswordAuthentication authentication;
 
@@ -87,7 +89,7 @@ public final class JdbcTenantAuthorization {
                 if (!rows.next()) {
                     return Decision.denied();
                 }
-                boolean eligible = eligible(rows.getString(1), rows.getString(2), rows.getString(3), rows.getString(4),
+                boolean eligible = TenantContextPolicy.eligible(rows.getString(1), rows.getString(2), rows.getString(3), rows.getString(4),
                         rows.getString(5), rows.getString(6), rows.getString(7));
                 Instant observedAt = rows.getTimestamp(8).toInstant();
                 UUID membership = rows.getObject(9, UUID.class);
@@ -98,15 +100,6 @@ public final class JdbcTenantAuthorization {
                 return new Decision(Outcome.ALLOWED, scope, observedAt, user, membership, branchMembership);
             }
         }
-    }
-
-    private static boolean eligible(String user, String tenant, String membership, String branch,
-            String access, String application, String entitlement) {
-        // Approved F03.T02 policy: publication alone never grants access. Every relationship must be ACTIVE.
-        // accepted_at is not an additional condition; this reader never activates a pending invitation.
-        return "ACTIVE".equals(user) && "ACTIVE".equals(tenant) && "ACTIVE".equals(membership)
-                && "ACTIVE".equals(branch) && "ACTIVE".equals(access) && "PUBLISHED".equals(application)
-                && "ACTIVE".equals(entitlement);
     }
 
     private static void checkIdentity(Connection connection) throws SQLException {

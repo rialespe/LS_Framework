@@ -8,7 +8,7 @@ sys.dont_write_bytecode = True
 from test_postgres_migrations import BACKEND, ROOT, SOURCE, check, disposable_cluster, environment, prepare_fixture
 
 
-def test_application_login(cluster):
+def test_application_login(cluster, test_class='ApplicationLoginPostgresTest'):
     check(cluster.port not in (5432, 55432), 'login uses only owned ephemeral PG17')
     role = 'ls_core_session_manager_dev'
     cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -19,34 +19,43 @@ def test_application_login(cluster):
         print((migrated.stdout + migrated.stderr)[-5000:])
     check(migrated.returncode == 0, 'restricted migrator applies V16')
     check(cluster.flyway('validate', location=SOURCE, target='16').returncode == 0, 'Flyway validates V1-V16')
-    cluster.secrets['login_tls'] = secrets.token_urlsafe(32)
+    if test_class != 'ApplicationLoginPostgresTest':
+        from postgres_session_context_contract import test_session_contexts
+        test_session_contexts(cluster)
+    else:
+        run_login_integration(cluster, test_class)
+
+
+def run_login_integration(cluster, test_class):
+    if 'login_tls' not in cluster.secrets:
+        cluster.secrets['login_tls'] = secrets.token_urlsafe(32)
     env = {k: v for k, v in environment().items() if not k.upper().startswith(('LS_LOGIN_', 'LS_AUTHENTICATION_'))}
     env['LS_LOGIN_TLS_STORE_PASSWORD'] = cluster.secrets['login_tls']
     keytool = Path(env['JAVA_HOME']) / 'bin' / ('keytool.exe' if os.name == 'nt' else 'keytool')
-    result = cluster.run([keytool, '-genkeypair', '-alias', 'localhost', '-keyalg', 'RSA', '-keysize', '2048',
-                          '-dname', 'CN=localhost', '-ext', 'SAN=IP:127.0.0.1,DNS:localhost', '-validity', '1',
-                          '-storetype', 'PKCS12', '-keystore', cluster.root / 'login-test.p12',
-                          '-storepass:env', 'LS_LOGIN_TLS_STORE_PASSWORD', '-keypass:env', 'LS_LOGIN_TLS_STORE_PASSWORD',
-                          '-noprompt'], env=env)
-    check(result.returncode == 0, 'owned test TLS certificate; no password in process arguments')
+    if not (cluster.root / 'login-test.p12').exists():
+        result = cluster.run([keytool, '-genkeypair', '-alias', 'localhost', '-keyalg', 'RSA', '-keysize', '2048',
+                              '-dname', 'CN=localhost', '-ext', 'SAN=IP:127.0.0.1,DNS:localhost', '-validity', '1',
+                              '-storetype', 'PKCS12', '-keystore', cluster.root / 'login-test.p12',
+                              '-storepass:env', 'LS_LOGIN_TLS_STORE_PASSWORD', '-keypass:env', 'LS_LOGIN_TLS_STORE_PASSWORD',
+                              '-noprompt'], env=env)
+        check(result.returncode == 0, 'owned test TLS certificate; no password in process arguments')
     env.update(LS_LOGIN_TEST_ROOT=str(cluster.root), LS_LOGIN_TEST_PORT=str(cluster.port),
                LS_LOGIN_TEST_TLS_PASSWORD=cluster.secrets['login_tls'])
     for principal, password in cluster.secrets.items():
         env['LS_LOGIN_TEST_' + principal.upper()] = password
     command = [str(BACKEND / 'mvnw.cmd')] if os.name == 'nt' else ['sh', str(BACKEND / 'mvnw')]
-    command += ['-B', '-ntp', '-f', str(BACKEND / 'pom.xml'), '-Dtest=ApplicationLoginPostgresTest', 'verify']
+    command += ['-B', '-ntp', '-f', str(BACKEND / 'pom.xml'), '-Dtest=' + test_class, 'verify']
     result = cluster.run(command, env=env, timeout=180)
     if result.returncode:
         print('HTTPS login integration failed; raw credential/cookie diagnostics withheld.')
         for line in result.stdout.splitlines():
-            if 'ApplicationLoginPostgresTest.java:' in line or 'Tests run:' in line or '[checkstyle]' in line:
+            if test_class + '.java:' in line or 'Tests run:' in line or '[checkstyle]' in line:
                 print(line)
     check(result.returncode == 0 and 'Tests run: 1, Failures: 0, Errors: 0, Skipped: 0' in result.stdout,
-          'ONE HTTPS/PG17 integration: secure cookies, digest persistence, per-app isolation, CSRF, F04 failures, '
-          'logout/revocation/replay and independent live sessions; Checkstyle')
+          test_class + ': ONE HTTPS/PG17 integration passed; Checkstyle')
 
 
-def main():
+def main(test_class='ApplicationLoginPostgresTest'):
     with disposable_cluster() as cluster:
         check(cluster.port not in (5432, 55432), 'refuse shared endpoints before fixture SQL')
         prepare_fixture(cluster)
@@ -72,8 +81,8 @@ def main():
                   'fixture isolated roles before V' + version)
             check(cluster.flyway('migrate', location=SOURCE, target=version).returncode == 0,
                   'unchanged V' + version + ' baseline')
-        test_application_login(cluster)
-    print('LFD-34 PASS: own PG17 stopped/removed; no shared server or F03 test was used.', flush=True)
+        test_application_login(cluster, test_class)
+    print(test_class + ' PASS: own PG17 stopped/removed; no shared server or F03 test was used.', flush=True)
 
 
 if __name__ == '__main__':
