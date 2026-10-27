@@ -43,13 +43,22 @@ public class ApplicationLoginConfiguration {
         return new JdbcApplicationSessions(source, authentication, Map.of(
                 LoginApplication.FISCAL, UUID.fromString(required(environment, "ls.login.fiscal.application-id")),
                 LoginApplication.POS, UUID.fromString(required(environment, "ls.login.pos.application-id"))),
-                Duration.ofSeconds(environment.getProperty("ls.login.session-seconds", Long.class, 28800L)));
+                Duration.ofSeconds(environment.getProperty("ls.login.session-seconds", Long.class, 28800L)),
+                environment.getProperty("ls.login.multidevice.enabled", Boolean.class, false) ? Map.of(
+                        LoginApplication.FISCAL, Duration.ofSeconds(environment.getProperty("ls.login.fiscal.idle-seconds", Long.class, 1800L)),
+                        LoginApplication.POS, Duration.ofSeconds(environment.getProperty("ls.login.pos.idle-seconds", Long.class, 900L))) : null);
     }
 
     @Bean
     @ConditionalOnProperty(name = "ls.login.contexts.enabled", havingValue = "true")
     JdbcSessionContexts sessionContexts(JdbcApplicationSessions sessions) {
         return new JdbcSessionContexts(sessions);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "ls.login.multidevice.enabled", havingValue = "true")
+    JdbcSessionManagement sessionManagement(JdbcApplicationSessions sessions) {
+        return new JdbcSessionManagement(sessions);
     }
 
     @Bean

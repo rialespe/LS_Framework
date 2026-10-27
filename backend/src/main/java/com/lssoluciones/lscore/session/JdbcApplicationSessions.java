@@ -24,10 +24,16 @@ public final class JdbcApplicationSessions {
     private final PasswordAuthentication authentication;
     private final Map<LoginApplication, UUID> applications;
     private final Duration validity;
+    private final Map<LoginApplication, Duration> idle;
     private final SecureRandom random = new SecureRandom();
 
     public JdbcApplicationSessions(DataSource source, PasswordAuthentication authentication,
             Map<LoginApplication, UUID> applications, Duration validity) {
+        this(source, authentication, applications, validity, null);
+    }
+
+    public JdbcApplicationSessions(DataSource source, PasswordAuthentication authentication,
+            Map<LoginApplication, UUID> applications, Duration validity, Map<LoginApplication, Duration> idle) {
         this.source = Objects.requireNonNull(source);
         if (!(authentication instanceof JdbcPasswordAuthentication) || validity == null
                 || validity.compareTo(Duration.ofMinutes(1)) < 0 || validity.compareTo(Duration.ofHours(24)) > 0
@@ -39,6 +45,12 @@ public final class JdbcApplicationSessions {
         this.authentication = authentication;
         this.applications = Map.copyOf(applications);
         this.validity = validity;
+        if (idle != null && (idle.size() != 2 || java.util.Arrays.stream(LoginApplication.values()).anyMatch(app ->
+                idle.get(app) == null || idle.get(app).compareTo(Duration.ofSeconds(60)) < 0
+                        || idle.get(app).compareTo(Duration.ofHours(24)) > 0))) {
+            throw new IllegalArgumentException("Invalid idle timeout configuration");
+        }
+        this.idle = idle == null ? null : Map.copyOf(idle);
     }
 
     public long validitySeconds() {
@@ -56,8 +68,9 @@ public final class JdbcApplicationSessions {
                 begin(connection);
                 try {
                     try (var statement = connection.prepareStatement("INSERT INTO security.sessions "
-                            + "(id,user_id,application_id,token_hash,expires_at) "
+                            + "(id,user_id,application_id,token_hash,expires_at" + (multidevice() ? ",last_seen_at) " : ") ")
                             + "SELECT ?,u.id,a.id,?,clock_timestamp()+(? * interval '1 second') "
+                            + (multidevice() ? ",clock_timestamp() " : "")
                             + "FROM identity.users u CROSS JOIN catalog.applications a "
                             + "WHERE u.id=? AND u.status='ACTIVE' AND a.id=? AND a.status='PUBLISHED'")) {
                         statement.setObject(1, UUID.randomUUID());
@@ -82,6 +95,14 @@ public final class JdbcApplicationSessions {
         } finally {
             Arrays.fill(bytes, (byte) 0);
         }
+    }
+
+    boolean multidevice() {
+        return idle != null;
+    }
+
+    long idleSeconds(LoginApplication application) {
+        return idle.get(application).toSeconds();
     }
 
     void requireSession(LoginApplication application, String token) {
@@ -116,6 +137,15 @@ public final class JdbcApplicationSessions {
         }
         T result;
         try (var connection = source.getConnection()) {
+            if (multidevice()) {
+                // Serialize this cookie before taking the repeatable snapshot: parallel HTTP reads
+                // now write activity. The owned physical PGSimple connection releases this lock on close.
+                try (var lock = connection.prepareStatement("SELECT pg_advisory_lock(hashtextextended(?,360018))")) {
+                    lock.setString(1, digest(token));
+                    lock.setQueryTimeout(5);
+                    lock.execute();
+                }
+            }
             begin(connection);
             try {
                 Session session;
@@ -124,11 +154,15 @@ public final class JdbcApplicationSessions {
                 try (var statement = connection.prepareStatement("SELECT s.id,s.user_id,s.application_id,s.expires_at "
                         + "FROM security.sessions s WHERE s.token_hash=? AND s.application_id=? AND s.revoked_at IS NULL "
                         + "AND s.expires_at>clock_timestamp() "
+                        + (multidevice() ? "AND coalesce(s.last_seen_at,s.created_at)>clock_timestamp()-(? * interval '1 second') " : "")
                         + "AND EXISTS(SELECT FROM identity.users u WHERE u.id=s.user_id AND u.status='ACTIVE') "
                         + "AND EXISTS(SELECT FROM catalog.applications a WHERE a.id=s.application_id AND a.status='PUBLISHED') "
                         + "FOR UPDATE OF s")) {
                     statement.setString(1, digest(token));
                     statement.setObject(2, applications.get(application));
+                    if (multidevice()) {
+                        statement.setLong(3, idleSeconds(application));
+                    }
                     statement.setQueryTimeout(5);
                     try (var rows = statement.executeQuery()) {
                         if (!rows.next()) {
@@ -137,6 +171,18 @@ public final class JdbcApplicationSessions {
                         session = new Session(rows.getObject(1, UUID.class), rows.getObject(2, UUID.class),
                                 rows.getObject(3, UUID.class), rows.getTimestamp(4).toInstant());
                         if (rows.next()) {
+                            throw new Rejected();
+                        }
+                    }
+                }
+                if (multidevice()) {
+                    try (var touch = connection.prepareStatement("UPDATE security.sessions SET last_seen_at=clock_timestamp() "
+                            + "WHERE id=? AND revoked_at IS NULL AND expires_at>clock_timestamp() "
+                            + "AND coalesce(last_seen_at,created_at)>clock_timestamp()-(? * interval '1 second')")) {
+                        touch.setObject(1, session.id());
+                        touch.setLong(2, idleSeconds(application));
+                        touch.setQueryTimeout(5);
+                        if (touch.executeUpdate() != 1) {
                             throw new Rejected();
                         }
                     }

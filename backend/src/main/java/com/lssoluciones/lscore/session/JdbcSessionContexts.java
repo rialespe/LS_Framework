@@ -120,18 +120,24 @@ public final class JdbcSessionContexts {
         });
     }
 
-    private static List<Access> access(Connection connection, JdbcApplicationSessions.Session session,
+    private List<Access> access(Connection connection, JdbcApplicationSessions.Session session,
             UUID tenant, UUID branch) throws SQLException {
         var result = new ArrayList<Access>();
-        try (var statement = connection.prepareStatement(ACCESS + (tenant == null ? "" : "AND t.id=? ")
+        String barrier = sessions.multidevice() ? "AND NOT EXISTS (SELECT FROM security.session_tenant_revocations rv "
+                + "WHERE rv.session_id=? AND rv.application_id=a.id AND rv.tenant_id=t.id) " : "";
+        try (var statement = connection.prepareStatement(ACCESS + barrier + (tenant == null ? "" : "AND t.id=? ")
                 + (branch == null ? "" : "AND b.id=? ") + "ORDER BY t.id,b.id")) {
             statement.setObject(1, session.userId());
             statement.setObject(2, session.applicationId());
+            int index = 3;
+            if (sessions.multidevice()) {
+                statement.setObject(index++, session.id());
+            }
             if (tenant != null) {
-                statement.setObject(3, tenant);
+                statement.setObject(index++, tenant);
             }
             if (branch != null) {
-                statement.setObject(4, branch);
+                statement.setObject(index, branch);
             }
             statement.setQueryTimeout(5);
             try (var rows = statement.executeQuery()) {

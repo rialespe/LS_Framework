@@ -20,6 +20,9 @@ it('connects login, rotated CSRF, selection, live permissions/navigation, contex
   let csrf = 0
   let revokeContext = false
   let unblockSelection: (() => void) | undefined
+  let sessions = [70, 71, 72].map((number, index) => ({ id: id(number), current: index === 0,
+    createdAt: '2026-10-27T10:00:00Z', lastSeenAt: '2026-10-27T10:01:00Z', expiresAt: '2026-10-27T18:00:00Z',
+    idleExpiresAt: '2026-10-27T10:31:00Z', status: 'ACTIVE', tenantRevoked: false }))
   const posts: string[] = []
   const storage = vi.spyOn(Storage.prototype, 'setItem')
   const json = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -36,6 +39,10 @@ it('connects login, rotated CSRF, selection, live permissions/navigation, contex
     }
     if (!authenticated) { return json({ error: 'Authentication unavailable' }, 401) }
     if (action === 'session') { return json({ authenticated: true }) }
+    if (action.endsWith('/session-administration')) { return json({ authorized: false }) }
+    if (action === 'sessions') { return json(sessions) }
+    if (action === 'sessions/revoke-others') { sessions = sessions.map(item => item.current ? item : { ...item, status: 'REVOKED' }); return json({ revoked: 1 }) }
+    if (action.startsWith('sessions/') && action.endsWith('/revoke')) { sessions = sessions.map(item => action.includes(item.id) ? { ...item, status: 'REVOKED' } : item); return json({ revoked: 1 }) }
     if (action === 'tenants') { expect(csrf).toBeGreaterThanOrEqual(2); return json(tenants) }
     if (action.startsWith('tenants/')) { return json(branches) }
     if (action === 'logout') { authenticated = false; selected = null; return json(null, 204) }
@@ -70,6 +77,22 @@ it('connects login, rotated CSRF, selection, live permissions/navigation, contex
     const permissions = await screen.findByRole('region', { name: 'Permisos efectivos' })
     expect(within(permissions).getByText(first.name)).toBeVisible()
     expect(within(screen.getByRole('navigation')).getByRole('button', { name: /Ubicaciones autorizadas/ })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Administrar sesiones de empresa' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Mis sesiones' }))
+    await screen.findByRole('heading', { name: 'Sesión actual' })
+    expect(screen.queryByRole('region', { name: 'Permisos efectivos' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cerrar sesión actual' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /Cerrar otra sesión: 00000071/ }))
+    expect(posts.at(-1)).toBe('context') // Confirmation has not made a request.
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar revocación' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Cerrar otra sesión: 00000071/ })).toBeDisabled())
+    expect(posts.at(-1)).toBe(`sessions/${id(71)}/revoke`)
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar todas las demás sesiones' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar revocación' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Cerrar otra sesión: 00000072/ })).toBeDisabled())
+    expect(screen.getByRole('button', { name: 'Cerrar sesión actual' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Volver al contexto' }))
+    await screen.findByRole('region', { name: 'Permisos efectivos' })
     fireEvent.click(screen.getByRole('button', { name: /Sucursal API B/ }))
     expect(screen.queryByText(first.name)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Ubicaciones autorizadas/ })).not.toBeInTheDocument()
@@ -94,11 +117,14 @@ it('connects login, rotated CSRF, selection, live permissions/navigation, contex
     expect(posts.at(-1)).toBe('logout')
     expect(screen.getByLabelText('Contraseña')).toHaveValue('')
     await signIn()
+    fireEvent.click(screen.getByRole('button', { name: 'Mis sesiones' }))
+    await screen.findByRole('heading', { name: 'Sesión actual' })
     authenticated = false
-    fireEvent.click(screen.getByRole('button', { name: 'Actualizar sesión' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar sesiones' }))
     await screen.findByText('La sesión no está vigente. Inicia sesión para continuar.')
     expect(screen.queryByRole('region', { name: 'Selector de contexto' })).not.toBeInTheDocument()
     expect(screen.queryByText(tenants[1].name)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sesión actual' })).not.toBeInTheDocument()
     expect(storage).not.toHaveBeenCalled()
     expect(document.cookie).toBe('')
   } finally { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks() }
