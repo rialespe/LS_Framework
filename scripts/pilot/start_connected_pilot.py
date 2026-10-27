@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V18, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V19, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -43,7 +43,8 @@ def prepare_database(cluster):
             (['ls_core_password_authenticator_dev', 'ls_core_password_recovery_dev'], 'prepare_password_recovery.sql', '13'),
             (['ls_core_authorization_reader_dev'], 'prepare_authorization_reader.sql', '14'),
             (['ls_core_branch_operation_dev', 'ls_core_operation_emitter_dev'], 'prepare_branch_operation.sql', '15'),
-            (['ls_core_session_manager_dev'], 'prepare_session_manager.sql', '18')]:
+            (['ls_core_session_manager_dev'], 'prepare_session_manager.sql', '18'),
+            (['ls_core_platform_bootstrap_dev', 'ls_core_platform_reader_dev'], 'prepare_platform_channels.sql', '19')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -51,7 +52,7 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='18').returncode == 0, 'Flyway validates V1-V18')
+    check(cluster.flyway('validate', location=SOURCE, target='19').returncode == 0, 'Flyway validates V1-V19')
 
 
 def main():

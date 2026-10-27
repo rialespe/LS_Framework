@@ -753,6 +753,8 @@ def main():
         test_session_contexts(cluster)
         from postgres_multidevice_contract import test_multidevice
         test_multidevice(cluster)
+        from postgres_platform_owner_contract import test_platform_owner
+        test_platform_owner(cluster)
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)

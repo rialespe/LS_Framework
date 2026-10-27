@@ -52,7 +52,9 @@ python scripts/pilot/start_connected_pilot.py
 El lanzador reutiliza `disposable_cluster`, `prepare_fixture` y los scripts de roles
 existentes. No admite URL, credenciales ni directorio de un PostgreSQL existente.
 Inicializa PG17 nuevo en `%TEMP%`, en puerto efímero distinto de 5432 y 55432, y aplica
-y valida V1–V18 como migrador restringido. El administrador solo prepara la fixture.
+y valida V1–V19 como migrador restringido. El administrador solo prepara la fixture.
+V19 incorpora los canales internos de plataforma sin designar propietarios ni
+superadministradores; la cuenta del piloto continúa siendo empresarial.
 
 Compila con `-DskipTests package dependency:build-classpath`, sin invocar integraciones
 históricas. `PilotAccount.java` usa el registrador y ciclo de contraseña de F04 para
