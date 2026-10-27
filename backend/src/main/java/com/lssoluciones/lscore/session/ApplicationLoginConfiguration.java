@@ -47,6 +47,12 @@ public class ApplicationLoginConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "ls.login.contexts.enabled", havingValue = "true")
+    JdbcSessionContexts sessionContexts(JdbcApplicationSessions sessions) {
+        return new JdbcSessionContexts(sessions);
+    }
+
+    @Bean
     FilterRegistrationBean<ApplicationLoginFilter> applicationLoginCsrf() {
         var registration = new FilterRegistrationBean<>(new ApplicationLoginFilter());
         registration.addUrlPatterns("/api/auth/*");

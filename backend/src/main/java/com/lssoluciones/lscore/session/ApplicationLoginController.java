@@ -77,13 +77,13 @@ public class ApplicationLoginController {
                 .path(request.getContextPath() + application.path()).maxAge(age).build().toString();
     }
 
-    private static String token(LoginApplication application, HttpServletRequest request) {
+    static String token(LoginApplication application, HttpServletRequest request) {
         String token = null;
         if (request.getCookies() != null) {
             for (var cookie : request.getCookies()) {
                 if (application.sessionCookie().equals(cookie.getName())) {
                     if (token != null) {
-                        throw new InvalidSession();
+                        throw new JdbcApplicationSessions.Rejected();
                     }
                     token = cookie.getValue();
                 }

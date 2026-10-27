@@ -36,7 +36,7 @@ import org.springframework.core.env.MapPropertySource;
 /** Exactly one real HTTPS/PG17 flow; the client trusts only the owned temporary test certificate. */
 @EnabledIfEnvironmentVariable(named = "LS_LOGIN_TEST_ROOT", matches = ".+")
 class ApplicationLoginPostgresTest {
-    private PGSimpleDataSource role(String user) throws Exception {
+    PGSimpleDataSource role(String user) throws Exception {
         Path root = Path.of(System.getenv("LS_LOGIN_TEST_ROOT")).toRealPath();
         assertEquals(Path.of(System.getProperty("java.io.tmpdir")).toRealPath(), root.getParent());
         assertTrue(root.getFileName().toString().startsWith("ls-core-migrations-test-"));
@@ -179,7 +179,7 @@ class ApplicationLoginPostgresTest {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.US_ASCII)));
     }
 
-    private static SSLContext trust(Path path) throws Exception {
+    static SSLContext trust(Path path) throws Exception {
         var store = KeyStore.getInstance("PKCS12");
         char[] password = System.getenv("LS_LOGIN_TEST_TLS_PASSWORD").toCharArray();
         try (var input = Files.newInputStream(path)) {
@@ -205,33 +205,33 @@ class ApplicationLoginPostgresTest {
         assertTrue(deletion ? cookie.getMaxAge() == 0 : cookie.getMaxAge() == 3600);
     }
 
-    private static String scalar(java.sql.Connection connection, String sql) throws Exception {
+    static String scalar(java.sql.Connection connection, String sql) throws Exception {
         try (var statement = connection.createStatement(); var rows = statement.executeQuery(sql)) {
             assertTrue(rows.next());
             return rows.getString(1);
         }
     }
 
-    private static final class Browser {
+    static final class Browser {
         private final HttpClient client;
         private final URI base;
         private final Map<String, HttpCookie> cookies = new HashMap<>();
         private HttpResponse<String> last;
 
-        private Browser(HttpClient client, URI base) {
+        Browser(HttpClient client, URI base) {
             this.client = client;
             this.base = base;
         }
 
-        private String token(LoginApplication application) {
+        String token(LoginApplication application) {
             return cookies.get(application.sessionCookie()).getValue();
         }
 
-        private HttpResponse<String> get(LoginApplication application, String action) throws Exception {
+        HttpResponse<String> get(LoginApplication application, String action) throws Exception {
             return send(application.path() + "/" + action, null, null);
         }
 
-        private String csrf(LoginApplication application) throws Exception {
+        String csrf(LoginApplication application) throws Exception {
             var response = get(application, "csrf");
             assertEquals(200, response.statusCode());
             assertTrue(response.headers().firstValue("Cache-Control").orElseThrow().contains("no-store"));
@@ -242,7 +242,7 @@ class ApplicationLoginPostgresTest {
             return match.group(1);
         }
 
-        private HttpResponse<String> post(LoginApplication application, String action, String csrf, String body) throws Exception {
+        HttpResponse<String> post(LoginApplication application, String action, String csrf, String body) throws Exception {
             return send(application.path() + "/" + action, csrf, body);
         }
 

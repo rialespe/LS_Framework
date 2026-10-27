@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.UUID;
 import javax.sql.DataSource;
 
-/** JDBC session persistence only. No tenant context, business SQL, recovery or session admission. */
+/** JDBC session persistence and bounded context transactions. No business SQL or session admission. */
 public final class JdbcApplicationSessions {
     public static final String ROLE = "ls_core_session_manager_dev";
     private final DataSource source;
@@ -85,50 +85,74 @@ public final class JdbcApplicationSessions {
     }
 
     void requireSession(LoginApplication application, String token) {
-        operate(application, token, false);
+        withSession(application, token, (connection, session) -> null);
     }
 
     void logout(LoginApplication application, String token) {
-        operate(application, token, true);
+        withSession(application, token, (connection, session) -> {
+            try (var statement = connection.prepareStatement("UPDATE security.sessions SET revoked_at=clock_timestamp(),"
+                    + "updated_at=clock_timestamp() WHERE id=? AND revoked_at IS NULL")) {
+                statement.setObject(1, session.id());
+                statement.setQueryTimeout(5);
+                if (statement.executeUpdate() != 1) {
+                    throw new SQLException();
+                }
+            }
+            return null;
+        });
     }
 
-    private void operate(LoginApplication application, String token, boolean revoke) {
+    // Package-only transaction composition. Subject data never escapes as a reusable credential.
+    record Session(UUID id, UUID userId, UUID applicationId, java.time.Instant expiresAt) { }
+
+    @FunctionalInterface
+    interface SessionWork<T> {
+        T run(Connection connection, Session session) throws SQLException;
+    }
+
+    <T> T withSession(LoginApplication application, String token, SessionWork<T> work) {
         if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) {
             throw new Rejected();
         }
+        T result;
         try (var connection = source.getConnection()) {
             begin(connection);
             try {
-                String scope = "s.token_hash=? AND s.application_id=? AND s.revoked_at IS NULL "
+                Session session;
+                // Repeatable snapshot plus session row lock serializes replacement and logout.
+                // Serialization conflicts fail closed; no retry after an uncertain commit.
+                try (var statement = connection.prepareStatement("SELECT s.id,s.user_id,s.application_id,s.expires_at "
+                        + "FROM security.sessions s WHERE s.token_hash=? AND s.application_id=? AND s.revoked_at IS NULL "
                         + "AND s.expires_at>clock_timestamp() "
                         + "AND EXISTS(SELECT FROM identity.users u WHERE u.id=s.user_id AND u.status='ACTIVE') "
-                        + "AND EXISTS(SELECT FROM catalog.applications a WHERE a.id=s.application_id AND a.status='PUBLISHED')";
-                String sql = revoke ? "UPDATE security.sessions s SET revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE " + scope
-                        : "SELECT s.id FROM security.sessions s WHERE " + scope;
-                try (var statement = connection.prepareStatement(sql)) {
+                        + "AND EXISTS(SELECT FROM catalog.applications a WHERE a.id=s.application_id AND a.status='PUBLISHED') "
+                        + "FOR UPDATE OF s")) {
                     statement.setString(1, digest(token));
                     statement.setObject(2, applications.get(application));
                     statement.setQueryTimeout(5);
-                    if (revoke) {
-                        if (statement.executeUpdate() != 1) {
-                            throw new SQLException();
+                    try (var rows = statement.executeQuery()) {
+                        if (!rows.next()) {
+                            throw new Rejected();
                         }
-                    } else {
-                        try (var rows = statement.executeQuery()) {
-                            if (!rows.next() || rows.next()) {
-                                throw new SQLException();
-                            }
+                        session = new Session(rows.getObject(1, UUID.class), rows.getObject(2, UUID.class),
+                                rows.getObject(3, UUID.class), rows.getTimestamp(4).toInstant());
+                        if (rows.next()) {
+                            throw new Rejected();
                         }
                     }
                 }
+                result = work.run(connection, session);
                 connection.commit();
             } catch (SQLException | RuntimeException failure) {
                 connection.rollback();
                 throw failure;
             }
+        } catch (JdbcSessionContexts.Denied failure) {
+            throw failure;
         } catch (SQLException | RuntimeException failure) {
             throw new Rejected();
         }
+        return result;
     }
 
     private static String digest(String token) {
@@ -141,7 +165,7 @@ public final class JdbcApplicationSessions {
 
     private static void begin(Connection connection) throws SQLException {
         connection.setReadOnly(false);
-        connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
         connection.setAutoCommit(false);
         try (var statement = connection.createStatement()) {
             statement.setQueryTimeout(5);
@@ -158,7 +182,7 @@ public final class JdbcApplicationSessions {
     }
 
     public static final class Rejected extends RuntimeException {
-        private Rejected() {
+        Rejected() {
             super("Authentication unavailable");
         }
     }
