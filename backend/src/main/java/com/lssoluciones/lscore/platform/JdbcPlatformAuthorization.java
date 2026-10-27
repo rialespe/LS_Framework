@@ -139,7 +139,7 @@ public final class JdbcPlatformAuthorization {
 
     public static final class MutationDisabled extends RuntimeException {
         private MutationDisabled() {
-            super("Global mutations disabled pending LFD-38 and LFD-39");
+            super("Global mutations disabled pending LFD-39");
         }
     }
 }
