@@ -62,7 +62,16 @@ class PilotAccount {
                         Arrays.fill(temporary, '\0');
                     }
                 }
-                registration.register(new ManualIdentityInput(System.getenv("LS_PILOT_INITIAL_USERNAME"), "Administrador inicial del piloto", null));
+                String initialName = System.getenv("LS_PILOT_INITIAL_USERNAME");
+                var initialUser = registration.register(new ManualIdentityInput(initialName, "Administrador inicial del piloto", null));
+                try (var issued = lifecycle.issue(initialUser)) {
+                    char[] temporary = issued.take();
+                    try {
+                        lifecycle.exchange(initialName, temporary, password);
+                    } finally {
+                        Arrays.fill(temporary, '\0');
+                    }
+                }
                 var authentication = new JdbcPasswordAuthentication(source(JdbcPasswordAuthentication.ROLE), JdbcPasswordAuthentication.Limits.defaults());
                 new JdbcPlatformBootstrap(source(JdbcPlatformBootstrap.ROLE), authentication).initialize(coreName, password);
             }

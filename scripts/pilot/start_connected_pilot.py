@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V22, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V23, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -47,7 +47,8 @@ def prepare_database(cluster):
             (['ls_core_platform_bootstrap_dev', 'ls_core_platform_reader_dev'], 'prepare_platform_channels.sql', '19'),
             ([], 'prepare_platform_mutator.sql', '20'),
             ([], 'prepare_platform_audit.sql', '21'),
-            (['ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'], 'prepare_tenant_registration.sql', '22')]:
+            (['ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'], 'prepare_tenant_registration.sql', '22'),
+            (['ls_core_tenant_lifecycle_dev', 'ls_core_tenant_lifecycle_log_dev'], 'prepare_tenant_lifecycle.sql', '23')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -55,7 +56,7 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='22').returncode == 0, 'Flyway validates V1-V22')
+    check(cluster.flyway('validate', location=SOURCE, target='23').returncode == 0, 'Flyway validates V1-V23')
 
 
 def core_smoke(opener, username, initial_username, password):
@@ -82,6 +83,15 @@ def core_smoke(opener, username, initial_username, password):
         result = json.load(response)
         check(result['outcome'] == 'CONFIRMED' and result['tenant']['status'] == 'PENDING', 'real atomic tenant registration PENDING through HTTPS proxy')
     check(get('registrations/' + key)['tenant']['id'] == result['tenant']['id'], 'persisted tenant reconciled from PostgreSQL')
+    tenant_id = result['tenant']['id']
+    check(get('tenant-authority')['canActivate'], 'explicit lifecycle authority')
+    for action, state in [('activate', 'ACTIVE'), ('suspend', 'SUSPENDED'), ('reactivate', 'ACTIVE')]:
+        operation = str(uuid.uuid4())
+        with post('tenants/' + tenant_id + '/' + action, {'requestId': operation, 'password': password}) as response:
+            check(json.load(response)['outcome'] == 'CONFIRMED', 'real HTTPS lifecycle ' + action)
+        check(get('tenants/' + tenant_id)['tenant']['status'] == state, 'persisted lifecycle state ' + state)
+        check(get('tenant-operations/' + operation)['outcome'] == 'CONFIRMED', 'persisted lifecycle evidence reconciliation')
+
     with post('logout', {}) as response:
         check(response.status == 204, 'Core logout confirmed')
 
@@ -122,7 +132,7 @@ def main():
         core_username = 'core-' + secrets.token_hex(4)
         initial_username = 'initial-' + secrets.token_hex(4)
         try:
-            check(cluster.run(cert_command, env=env).returncode == 0, 'temporary localhost certificate and current-user CA trust')
+            check(cluster.run(cert_command + (['-SkipUserTrust'] if options.smoke_only else []), env=env).returncode == 0, 'temporary localhost certificate with owned CA validation')
             prepare_database(cluster)
             command = [BACKEND / 'mvnw.cmd', '-B', '-ntp', '-f', BACKEND / 'pom.xml', '-DskipTests', 'package',
                        'dependency:build-classpath', '-Dmdep.outputFile=' + str(cluster.root / 'classpath.txt')]
@@ -155,10 +165,12 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true',
+                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
                 for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
-                                     ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev')]:
+                                     ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev'),
+                                     ('LS_TENANT_LIFECYCLE_DB_', 'ls_core_tenant_lifecycle_dev'),
+                                     ('LS_TENANT_LIFECYCLE_LOG_DB_', 'ls_core_tenant_lifecycle_log_dev')]:
                     env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev', prefix + 'PASSWORD': cluster.secrets[role]})
             backend_env = dict(env)
             frontend_env = {key: value for key, value in env.items() if not key.startswith(('LS_', 'SERVER_'))}

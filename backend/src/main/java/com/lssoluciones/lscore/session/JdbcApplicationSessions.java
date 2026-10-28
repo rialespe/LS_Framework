@@ -146,6 +146,14 @@ public final class JdbcApplicationSessions {
                     lock.execute();
                 }
             }
+            // Acquire before the repeatable snapshot. Physical close releases this shared admission barrier.
+            // Core administration uses a separate writer and must never take this shared lock.
+            if (application != LoginApplication.CORE) {
+                try (var barrier = connection.createStatement()) {
+                    barrier.setQueryTimeout(5);
+                    barrier.execute("SELECT pg_advisory_lock_shared(410023,1)");
+                }
+            }
             begin(connection);
             try {
                 Session session;
@@ -193,7 +201,7 @@ public final class JdbcApplicationSessions {
                 connection.rollback();
                 throw failure;
             }
-        } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied failure) {
+        } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied | JdbcTenantLifecycle.Denied | JdbcTenantLifecycle.Unavailable failure) {
             throw failure;
         } catch (SQLException | RuntimeException failure) {
             throw new Rejected();

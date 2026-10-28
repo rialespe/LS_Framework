@@ -312,3 +312,39 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
 .pilot-list p { color: var(--neutral-700); }
 .navigation button:disabled { cursor: not-allowed; opacity: .65; }
 @media (max-width: 640px) { .pilot-actions { width: 100%; } .pilot-actions .button { flex: 1; } }
+/* Persisted Core administration. */
+.core-main { max-width: 1680px; width: calc(100% - 64px); margin-inline: auto; }
+.core-main .context-layout { grid-template-columns: minmax(0, 1fr); }
+.core-main .context-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.core-main .context-steps > .preview-panel { padding: 28px; }
+.core-main .context-steps > :only-child { grid-column: 1 / -1; }
+.core-main .access-field { margin-bottom: 20px; }
+.tenant-admin { display: grid; gap: 24px; }
+.tenant-toolbar, .tenant-pagination, .tenant-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tenant-toolbar h2 { margin: 4px 0 8px; }
+.tenant-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.tenant-list, .tenant-detail { min-width: 0; padding: 28px; }
+.tenant-table-wrap { overflow-x: auto; }
+.tenant-table { width: 100%; border-collapse: collapse; text-align: left; font-size: .875rem; }
+.tenant-table th { color: #536779; background: #f3f7fa; font-weight: 600; }
+.tenant-table th, .tenant-table td { padding: 16px 12px; border-bottom: 1px solid #e2e9ef; vertical-align: top; }
+.tenant-table small, .tenant-detail small, .tenant-history small { display: block; margin-top: 6px; color: #586b7d; overflow-wrap: anywhere; }
+.tenant-table td:first-child { min-width: 210px; }
+.tenant-pagination { justify-content: flex-end; padding-top: 20px; }
+.tenant-state { display: inline-block; padding: 6px 12px; border-radius: 24px; font-size: .8rem; font-weight: 700; }
+.state-pending { color: #785511; background: #fff3d6; }
+.state-active { color: #16633f; background: #ddf4e7; }
+.state-suspended { color: #983338; background: #ffe5e6; }
+.tenant-detail dl { display: grid; grid-template-columns: minmax(110px, 1fr) 2fr; gap: 12px; margin-block: 24px; }
+.tenant-detail dd { margin: 0; overflow-wrap: anywhere; }
+.tenant-detail dt { color: #586b7d; }
+.tenant-actions { justify-content: flex-start; margin-top: 16px; }
+.tenant-confirmation, .tenant-notice { border: 1px solid #ccdce9; border-radius: 12px; padding: 20px; margin-top: 20px; background: #f5f9fc; }
+.tenant-confirmation label { display: block; margin-block: 16px 8px; font-weight: 600; }
+.tenant-confirmation input { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px; border: 1px solid #99aebe; border-radius: 6px; }
+.tenant-history { padding-left: 20px; }
+.tenant-history li { margin-bottom: 18px; }
+.tenant-actions .danger { color: #9e282d; border-color: #d7979a; }
+.tenant-notice code { overflow-wrap: anywhere; }
+@media (min-width: 1400px) { .tenant-grid:has(.tenant-detail) { grid-template-columns: minmax(0, 1.55fr) minmax(350px, 1fr); } }
+@media (max-width: 700px) { .core-main { width: calc(100% - 28px); } .core-main .context-steps { grid-template-columns: minmax(0, 1fr); } .tenant-list, .tenant-detail { padding: 18px; } .tenant-detail dl { grid-template-columns: 1fr; gap: 6px; } .tenant-detail dd { margin-bottom: 12px; } }

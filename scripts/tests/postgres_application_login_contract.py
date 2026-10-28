@@ -19,9 +19,9 @@ def test_application_login(cluster, test_class='ApplicationLoginPostgresTest'):
         print((migrated.stdout + migrated.stderr)[-5000:])
     check(migrated.returncode == 0, 'restricted migrator applies V16')
     check(cluster.flyway('validate', location=SOURCE, target='16').returncode == 0, 'Flyway validates V1-V16')
-    if test_class == 'TenantRegistrationPostgresTest':
+    if test_class in ('TenantRegistrationPostgresTest', 'TenantLifecyclePostgresTest'):
         from postgres_tenant_registration_contract import test_tenant_registration
-        test_tenant_registration(cluster)
+        test_tenant_registration(cluster, test_class)
     elif test_class == 'PlatformPrivilegedPostgresTest':
         from postgres_platform_privileged_contract import test_platform_privileged
         test_platform_privileged(cluster)
@@ -65,7 +65,7 @@ def run_login_integration(cluster, test_class):
         print('HTTPS login integration failed; raw credential/cookie diagnostics withheld.')
         for line in result.stdout.splitlines():
             if test_class + '.java:' in line or 'Tests run:' in line or '[checkstyle]' in line:
-                print(line)
+                print(line.encode('ascii', errors='backslashreplace').decode('ascii'))
     check(result.returncode == 0 and 'Tests run: 1, Failures: 0, Errors: 0, Skipped: 0' in result.stdout,
           test_class + ': ONE HTTPS/PG17 integration passed; Checkstyle')
 
