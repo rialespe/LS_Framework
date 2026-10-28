@@ -22,7 +22,14 @@ final class ApplicationLoginFilter implements Filter {
     private final Map<LoginApplication, CsrfFilter> filters = new EnumMap<>(LoginApplication.class);
 
     ApplicationLoginFilter() {
+        this(false);
+    }
+
+    ApplicationLoginFilter(boolean coreEnabled) {
         for (var application : LoginApplication.values()) {
+            if (application == LoginApplication.CORE && !coreEnabled) {
+                continue;
+            }
             var repository = new CookieCsrfTokenRepository();
             repository.setCookieName(application.csrfCookie());
             repository.setCookiePath("/"); // __Host- requires / and forbids Domain; names remain app-specific.
@@ -49,7 +56,12 @@ final class ApplicationLoginFilter implements Filter {
         }
         String path = http.getServletPath();
         for (var application : LoginApplication.values()) {
-            if (path.startsWith(application.path() + "/")) {
+            if (path.startsWith(application.path() + "/") && filters.containsKey(application)) {
+                if (application == LoginApplication.CORE && !path.substring(application.path().length()).matches(
+                        "/(csrf|login|session|logout|authority|initial-administrator|registrations(?:/[0-9a-fA-F-]{36})?)")) {
+                    reject(output, 404);
+                    return;
+                }
                 http.setAttribute(APPLICATION, application);
                 http.setAttribute(REPOSITORY, repositories.get(application));
                 filters.get(application).doFilter(http, output, chain);

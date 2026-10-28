@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V21, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V22, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -46,7 +46,8 @@ def prepare_database(cluster):
             (['ls_core_session_manager_dev'], 'prepare_session_manager.sql', '18'),
             (['ls_core_platform_bootstrap_dev', 'ls_core_platform_reader_dev'], 'prepare_platform_channels.sql', '19'),
             ([], 'prepare_platform_mutator.sql', '20'),
-            ([], 'prepare_platform_audit.sql', '21')]:
+            ([], 'prepare_platform_audit.sql', '21'),
+            (['ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'], 'prepare_tenant_registration.sql', '22')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -54,12 +55,41 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='21').returncode == 0, 'Flyway validates V1-V21')
+    check(cluster.flyway('validate', location=SOURCE, target='22').returncode == 0, 'Flyway validates V1-V22')
+
+
+def core_smoke(opener, username, initial_username, password):
+    import uuid
+    def get(action):
+        with opener.open(URL + '/api/auth/core/' + action, timeout=10) as response:
+            return json.load(response)
+    def post(action, body):
+        csrf = get('csrf')['csrfToken']
+        request = urllib.request.Request(URL + '/api/auth/core/' + action, method='POST', data=json.dumps(body).encode(),
+                                         headers={'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf})
+        return opener.open(request, timeout=15)
+    with opener.open(URL + '/core', timeout=5) as response:
+        check('id="root"' in response.read().decode(), 'Core React entry over same-origin HTTPS')
+    with opener.open(URL + '/src/app/ConnectedCore.tsx', timeout=5) as response:
+        check(response.status == 200, 'Core React form transforms through Vite')
+    with post('login', {'username': username, 'password': password}) as response:
+        check(response.status == 204, 'real independent Core HTTPS login')
+    check(get('authority')['canRegister'], 'real global registration authority')
+    with post('initial-administrator', {'username': initial_username}) as response:
+        initial = json.load(response)['id']
+    key = str(uuid.uuid4())
+    with post('registrations', {'requestId': key, 'name': 'Empresa del recorrido local', 'administratorId': initial, 'password': password}) as response:
+        result = json.load(response)
+        check(result['outcome'] == 'CONFIRMED' and result['tenant']['status'] == 'PENDING', 'real atomic tenant registration PENDING through HTTPS proxy')
+    check(get('registrations/' + key)['tenant']['id'] == result['tenant']['id'], 'persisted tenant reconciled from PostgreSQL')
+    with post('logout', {}) as response:
+        check(response.status == 204, 'Core logout confirmed')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--smoke-only', action='store_true')
+    parser.add_argument('--core', action='store_true', help='Explicit disposable LS Core owner and registration pilot, independent of Fiscal')
     options = parser.parse_args()
     if os.name != 'nt':
         raise RuntimeError('This local trust-store launcher supports Windows only; see the pilot guide for manual setup.')
@@ -89,19 +119,24 @@ def main():
             raise RuntimeError('Remove NODE_TLS_REJECT_UNAUTHORIZED=0 before starting the pilot')
         env['LS_PILOT_TLS_PASSWORD'] = cluster.secrets['pilot_tls']
         username = 'pilot-' + secrets.token_hex(4)
+        core_username = 'core-' + secrets.token_hex(4)
+        initial_username = 'initial-' + secrets.token_hex(4)
         try:
             check(cluster.run(cert_command, env=env).returncode == 0, 'temporary localhost certificate and current-user CA trust')
             prepare_database(cluster)
             command = [BACKEND / 'mvnw.cmd', '-B', '-ntp', '-f', BACKEND / 'pom.xml', '-DskipTests', 'package',
                        'dependency:build-classpath', '-Dmdep.outputFile=' + str(cluster.root / 'classpath.txt')]
             check(cluster.run(command, timeout=180).returncode == 0, 'package backend and resolve tooling classpath without running tests')
-            env.update(LS_PILOT_ROOT=str(cluster.root), LS_PILOT_PORT=str(cluster.port), LS_PILOT_USERNAME=username)
+            env.update(LS_PILOT_ROOT=str(cluster.root), LS_PILOT_PORT=str(cluster.port), LS_PILOT_USERNAME=username,
+                       LS_PILOT_CORE_USERNAME=core_username, LS_PILOT_INITIAL_USERNAME=initial_username)
             for role, secret in cluster.secrets.items():
                 env['LS_PILOT_' + role.upper()] = secret
             classpath = str(BACKEND / 'target/classes') + os.pathsep + (cluster.root / 'classpath.txt').read_text(encoding='utf-8').strip()
             check(cluster.run([java, '--class-path', classpath, ROOT / 'scripts/pilot/PilotAccount.java',
-                               BACKEND / 'src/test/resources/session-context-fixture.sql'], input_text=password, env=env).returncode == 0,
+                               BACKEND / 'src/test/resources/session-context-fixture.sql', *(['--core'] if options.core else [])], input_text=password, env=env).returncode == 0,
                   'real F04 account and existing disposable V17 fixture')
+            if options.core:
+                check(cluster.psql(script=ROOT / 'scripts/migrations/seal_platform_bootstrap.sql', apply=True).returncode == 0, 'explicit disposable Core owner installed and bootstrap sealed')
             # Provisioning credentials are not inherited by either application process.
             env = {key: value for key, value in env.items() if not key.startswith('LS_PILOT_')}
             with socket.socket() as listener:
@@ -119,9 +154,15 @@ def main():
                                  ('LS_LOGIN_DB_', 'ls_core_session_manager_dev')]:
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
+            if options.core:
+                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true',
+                           LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
+                for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
+                                     ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev')]:
+                    env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev', prefix + 'PASSWORD': cluster.secrets[role]})
             backend_env = dict(env)
             frontend_env = {key: value for key, value in env.items() if not key.startswith(('LS_', 'SERVER_'))}
-            frontend_env.update(VITE_CONNECTED_PILOT='true', VITE_CATALOG_ENABLED='false',
+            frontend_env.update(VITE_CORE_REGISTRATION='true' if options.core else 'false', VITE_CONNECTED_PILOT='true', VITE_CATALOG_ENABLED='false',
                                 LS_PILOT_TLS_PFX=str(cluster.root / 'pilot.p12'), LS_PILOT_TLS_CA=str(cluster.root / 'pilot-ca.pem'),
                                 LS_PILOT_TLS_PASSWORD=cluster.secrets['pilot_tls'], LS_PILOT_BACKEND_URL=f'https://127.0.0.1:{backend_port}')
             for args, cwd, process_env, name in [
@@ -152,7 +193,11 @@ def main():
                 check(response.status == 200, 'connected React module transforms successfully')
             print('PILOT READY: ' + URL + ' | Usuario: ' + username, flush=True)
             print('Cuenta, empresas, sucursales y permisos existen solo en este PG17 desechable. Ctrl+C detiene y elimina el entorno.', flush=True)
-            if options.smoke_only:
+            if options.core:
+                print('LS CORE: ' + URL + '/core | OWNER: ' + core_username + ' | Administrador inicial disponible: ' + initial_username, flush=True)
+            if options.smoke_only and options.core:
+                core_smoke(opener, core_username, initial_username, password)
+            elif options.smoke_only:
                 # New proxy/provisioning smoke only; never invokes historical JUnit integration methods.
                 request = urllib.request.Request(URL + '/api/auth/fiscal/login', method='POST',
                     data=json.dumps({'username': username, 'password': password}).encode(),

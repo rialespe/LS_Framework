@@ -1,6 +1,8 @@
 import com.lssoluciones.lscore.identity.application.ManualIdentityInput;
 import com.lssoluciones.lscore.identity.infrastructure.jdbc.JdbcManualIdentityRegistration;
 import com.lssoluciones.lscore.identity.infrastructure.jdbc.JdbcPasswordLifecycle;
+import com.lssoluciones.lscore.identity.infrastructure.jdbc.JdbcPasswordAuthentication;
+import com.lssoluciones.lscore.platform.JdbcPlatformBootstrap;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,6 +50,21 @@ class PilotAccount {
                 } finally {
                     Arrays.fill(temporary, '\0');
                 }
+            }
+            if (args.length == 2 && "--core".equals(args[1])) {
+                String coreName = System.getenv("LS_PILOT_CORE_USERNAME");
+                var coreUser = registration.register(new ManualIdentityInput(coreName, "Propietario del piloto desechable", null));
+                try (var issued = lifecycle.issue(coreUser)) {
+                    char[] temporary = issued.take();
+                    try {
+                        lifecycle.exchange(coreName, temporary, password);
+                    } finally {
+                        Arrays.fill(temporary, '\0');
+                    }
+                }
+                registration.register(new ManualIdentityInput(System.getenv("LS_PILOT_INITIAL_USERNAME"), "Administrador inicial del piloto", null));
+                var authentication = new JdbcPasswordAuthentication(source(JdbcPasswordAuthentication.ROLE), JdbcPasswordAuthentication.Limits.defaults());
+                new JdbcPlatformBootstrap(source(JdbcPlatformBootstrap.ROLE), authentication).initialize(coreName, password);
             }
             // Administrative fixture only. All later functional traffic uses the V16 restricted LOGIN.
             try (var admin = source("postgres").getConnection(); var sql = admin.createStatement()) {

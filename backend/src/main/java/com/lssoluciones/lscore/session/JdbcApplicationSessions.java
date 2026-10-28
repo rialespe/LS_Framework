@@ -37,15 +37,15 @@ public final class JdbcApplicationSessions {
         this.source = Objects.requireNonNull(source);
         if (!(authentication instanceof JdbcPasswordAuthentication) || validity == null
                 || validity.compareTo(Duration.ofMinutes(1)) < 0 || validity.compareTo(Duration.ofHours(24)) > 0
-                || applications.size() != 2 || applications.get(LoginApplication.FISCAL) == null
+                || (applications.size() != 2 && applications.size() != 3) || applications.get(LoginApplication.FISCAL) == null
                 || applications.get(LoginApplication.POS) == null
-                || applications.get(LoginApplication.FISCAL).equals(applications.get(LoginApplication.POS))) {
+                || applications.values().stream().distinct().count() != applications.size()) {
             throw new IllegalArgumentException("Invalid application session configuration");
         }
         this.authentication = authentication;
         this.applications = Map.copyOf(applications);
         this.validity = validity;
-        if (idle != null && (idle.size() != 2 || java.util.Arrays.stream(LoginApplication.values()).anyMatch(app ->
+        if (idle != null && (!idle.keySet().equals(applications.keySet()) || applications.keySet().stream().anyMatch(app ->
                 idle.get(app) == null || idle.get(app).compareTo(Duration.ofSeconds(60)) < 0
                         || idle.get(app).compareTo(Duration.ofHours(24)) > 0))) {
             throw new IllegalArgumentException("Invalid idle timeout configuration");
@@ -193,7 +193,7 @@ public final class JdbcApplicationSessions {
                 connection.rollback();
                 throw failure;
             }
-        } catch (JdbcSessionContexts.Denied failure) {
+        } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied failure) {
             throw failure;
         } catch (SQLException | RuntimeException failure) {
             throw new Rejected();

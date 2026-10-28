@@ -762,6 +762,8 @@ def main():
     concurrency_main('PlatformConcurrencyPostgresTest')
     from postgres_platform_privileged_contract import main as privileged_main
     privileged_main('PlatformPrivilegedPostgresTest')
+    from postgres_tenant_registration_contract import main as registration_main
+    registration_main('TenantRegistrationPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 
