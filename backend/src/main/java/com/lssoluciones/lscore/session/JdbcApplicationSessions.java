@@ -201,7 +201,8 @@ public final class JdbcApplicationSessions {
                 connection.rollback();
                 throw failure;
             }
-        } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied | JdbcTenantLifecycle.Denied | JdbcTenantLifecycle.Unavailable failure) {
+        } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied | JdbcTenantLifecycle.Denied | JdbcTenantLifecycle.Unavailable
+                | JdbcTenantAdministrators.Denied | JdbcTenantAdministrators.Missing | JdbcTenantAdministrators.Unavailable failure) {
             throw failure;
         } catch (SQLException | RuntimeException failure) {
             throw new Rejected();

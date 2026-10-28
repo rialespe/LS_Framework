@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TenantAdministrators } from './TenantAdministrators'
 import { coreApi, CoreFailure } from './coreApi'
 import type { TenantAction, TenantAuthority, TenantDetail, TenantPage, LifecycleResult } from './coreApi'
 
@@ -17,6 +18,7 @@ export function TenantAdministration() {
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [showAdministrators, setShowAdministrators] = useState(false)
   const [action, setAction] = useState<TenantAction | null>(null)
   const [pending, setPending] = useState<string | null>(() => sessionStorage.getItem('ls.core.pending-lifecycle'))
   const working = useRef(false)
@@ -34,7 +36,7 @@ export function TenantAdministration() {
   useEffect(() => { queueMicrotask(() => { void load(0) }) }, [load])
   const select = async (id: string) => {
     if (working.current) { return }
-    working.current = true; setBusy(true); setAction(null)
+    working.current = true; setBusy(true); setAction(null); setShowAdministrators(false)
     try { setAuthority(await coreApi.tenantAuthority()); setDetail(await coreApi.tenant(id)) }
     catch (error) { fail(error) }
     finally { working.current = false; setBusy(false) }
@@ -56,6 +58,7 @@ export function TenantAdministration() {
   }
   const pendingReference = useRef(pending)
   const submit = async (form: HTMLFormElement) => {
+    if (sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-registration')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); form.reset(); return }
     if (working.current || !detail || !action || pending) { return }
     const password = String(new FormData(form).get('password')); form.reset()
     if (!password || !window.confirm(labels[action] + ' esta empresa. ¿Confirmas la operación?')) { return }
@@ -91,7 +94,8 @@ export function TenantAdministration() {
     {t && <section className="preview-panel tenant-detail" aria-label="Ficha de empresa"><p className="eyebrow">FICHA DE EMPRESA</p><h3>{t.name}</h3><span className={'tenant-state state-' + t.status.toLowerCase()}>{states[t.status] ?? t.status}</span>
       <dl><dt>Identificador</dt><dd>{t.id}</dd><dt>Fecha de creación</dt><dd>{new Date(t.createdAt).toLocaleString('es-CL')}</dd><dt>Administrador inicial</dt><dd>{t.administratorName ?? 'Sin designación'}<small>{t.administratorId}</small></dd><dt>Estado de identidad</dt><dd>{t.administratorStatus ?? 'Sin información'}</dd></dl>
       {!pending && <div className="tenant-actions">{t.status === 'PENDING' && authority.canActivate && <button className="button primary" disabled={busy} onClick={() => setAction('activate')}>Activar</button>}{t.status === 'ACTIVE' && authority.canSuspend && <button className="button danger" disabled={busy} onClick={() => setAction('suspend')}>Suspender</button>}{t.status === 'SUSPENDED' && authority.canReactivate && <button className="button primary" disabled={busy} onClick={() => setAction('reactivate')}>Reactivar</button>}</div>}
-      {action && !pending && <form className="tenant-confirmation" onSubmit={e => { e.preventDefault(); void submit(e.currentTarget) }}><h4>{labels[action]} empresa</h4><p>{action === 'suspend' ? 'Se revocarán los contextos empresariales de esta empresa. Se conservarán los datos y las otras empresas.' : 'Se comprobará la preparación del administrador inicial. No se conceden módulos ni aplicaciones.'}</p><label htmlFor="lifecycle-password">Confirmar contraseña para {labels[action].toLowerCase()}</label><input id="lifecycle-password" name="password" type="password" autoComplete="current-password" maxLength={1024} required disabled={busy} /><div className="tenant-actions"><button className="button primary" disabled={busy}>Confirmar {labels[action].toLowerCase()}</button><button className="button" type="button" disabled={busy} onClick={() => setAction(null)}>Cancelar</button></div></form>}
+      {action && !pending && <form className="tenant-confirmation" onSubmit={e => { e.preventDefault(); void submit(e.currentTarget) }}><h4>{labels[action]} empresa</h4><p>{action === 'suspend' ? 'Se revocarán los contextos empresariales de esta empresa. Se conservarán los datos y las otras empresas.' : 'Se comprobará la preparación administrativa vigente. No se conceden módulos ni aplicaciones.'}</p><label htmlFor="lifecycle-password">Confirmar contraseña para {labels[action].toLowerCase()}</label><input id="lifecycle-password" name="password" type="password" autoComplete="current-password" maxLength={1024} required disabled={busy} /><div className="tenant-actions"><button className="button primary" disabled={busy}>Confirmar {labels[action].toLowerCase()}</button><button className="button" type="button" disabled={busy} onClick={() => setAction(null)}>Cancelar</button></div></form>}
+      <button className="button" disabled={busy || !!pending} onClick={() => setShowAdministrators(!showAdministrators)}>Administradores</button>{showAdministrators && <TenantAdministrators key={t.id} tenantId={t.id} />}
       <h4>Historial de cambios</h4>{detail.history.length ? <ol className="tenant-history">{detail.history.map(change => <li key={change.requestId}><strong>{states[change.previousStatus] } → {states[change.resultingStatus]}</strong><small>{new Date(change.createdAt).toLocaleString('es-CL')}</small><small>Referencia: {change.requestId}</small></li>)}</ol> : <p>Sin cambios de estado registrados.</p>}
     </section>}
     </div>}

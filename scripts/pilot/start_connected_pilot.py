@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V23, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V24, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -48,7 +48,8 @@ def prepare_database(cluster):
             ([], 'prepare_platform_mutator.sql', '20'),
             ([], 'prepare_platform_audit.sql', '21'),
             (['ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'], 'prepare_tenant_registration.sql', '22'),
-            (['ls_core_tenant_lifecycle_dev', 'ls_core_tenant_lifecycle_log_dev'], 'prepare_tenant_lifecycle.sql', '23')]:
+            (['ls_core_tenant_lifecycle_dev', 'ls_core_tenant_lifecycle_log_dev'], 'prepare_tenant_lifecycle.sql', '23'),
+            (['ls_core_tenant_admin_dev', 'ls_core_tenant_admin_log_dev'], 'prepare_tenant_administrators.sql', '24')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -56,10 +57,10 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='23').returncode == 0, 'Flyway validates V1-V23')
+    check(cluster.flyway('validate', location=SOURCE, target='24').returncode == 0, 'Flyway validates V1-V24')
 
 
-def core_smoke(opener, username, initial_username, password):
+def core_smoke(opener, username, initial_username, second_username, password, cluster):
     import uuid
     def get(action):
         with opener.open(URL + '/api/auth/core/' + action, timeout=10) as response:
@@ -92,6 +93,25 @@ def core_smoke(opener, username, initial_username, password):
         check(get('tenants/' + tenant_id)['tenant']['status'] == state, 'persisted lifecycle state ' + state)
         check(get('tenant-operations/' + operation)['outcome'] == 'CONFIRMED', 'persisted lifecycle evidence reconciliation')
 
+    admin_path = 'tenants/' + tenant_id + '/administrators'
+    initial_designation = next(a['id'] for a in get(admin_path)['administrators'] if a['username'] == initial_username)
+    with post(admin_path + '/candidate', {'username': second_username}) as response:
+        check(json.load(response)['ready'], 'second administrator has real definitive F04 credentials')
+    for action, candidate in [('/designate', second_username), ('/' + initial_designation + '/revoke', None)]:
+        operation = str(uuid.uuid4())
+        with post(admin_path + action, {'requestId': operation, 'username': candidate, 'password': password}) as response:
+            check(json.load(response)['outcome'] == 'CONFIRMED', 'real administrator command ' + action.split('/')[-1])
+        check(get('administrator-operations/' + operation)['outcome'] == 'CONFIRMED', 'administrator receipt persisted')
+    listing = get(admin_path)
+    check(listing['validCount'] == 1 and len(listing['history']) == 2, 'one valid administrator and persisted history')
+    last = next(a['id'] for a in listing['administrators'] if a['valid'])
+    try:
+        post(admin_path + '/' + last + '/revoke', {'requestId': str(uuid.uuid4()), 'password': password})
+        raise RuntimeError('Last valid administrator must be protected')
+    except urllib.error.HTTPError as rejected:
+        check(rejected.code == 409, 'last administrator rejected by PostgreSQL through HTTPS')
+        rejected.close()
+    check(cluster.query("SELECT count(*) FROM tenant.valid_administrators('" + tenant_id + "')") == '1', 'PG17 confirms one valid administrator after rejected revocation')
     with post('logout', {}) as response:
         check(response.status == 204, 'Core logout confirmed')
 
@@ -165,12 +185,14 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true',
+                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
                 for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
                                      ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev'),
                                      ('LS_TENANT_LIFECYCLE_DB_', 'ls_core_tenant_lifecycle_dev'),
-                                     ('LS_TENANT_LIFECYCLE_LOG_DB_', 'ls_core_tenant_lifecycle_log_dev')]:
+                                     ('LS_TENANT_LIFECYCLE_LOG_DB_', 'ls_core_tenant_lifecycle_log_dev'),
+                                     ('LS_TENANT_ADMIN_DB_', 'ls_core_tenant_admin_dev'),
+                                     ('LS_TENANT_ADMIN_LOG_DB_', 'ls_core_tenant_admin_log_dev')]:
                     env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev', prefix + 'PASSWORD': cluster.secrets[role]})
             backend_env = dict(env)
             frontend_env = {key: value for key, value in env.items() if not key.startswith(('LS_', 'SERVER_'))}
@@ -206,9 +228,9 @@ def main():
             print('PILOT READY: ' + URL + ' | Usuario: ' + username, flush=True)
             print('Cuenta, empresas, sucursales y permisos existen solo en este PG17 desechable. Ctrl+C detiene y elimina el entorno.', flush=True)
             if options.core:
-                print('LS CORE: ' + URL + '/core | OWNER: ' + core_username + ' | Administrador inicial disponible: ' + initial_username, flush=True)
+                print('LS CORE: ' + URL + '/core | OWNER: ' + core_username + ' | Administrador inicial disponible: ' + initial_username + ' | Segundo candidato: ' + username, flush=True)
             if options.smoke_only and options.core:
-                core_smoke(opener, core_username, initial_username, password)
+                core_smoke(opener, core_username, initial_username, username, password, cluster)
             elif options.smoke_only:
                 # New proxy/provisioning smoke only; never invokes historical JUnit integration methods.
                 request = urllib.request.Request(URL + '/api/auth/fiscal/login', method='POST',
