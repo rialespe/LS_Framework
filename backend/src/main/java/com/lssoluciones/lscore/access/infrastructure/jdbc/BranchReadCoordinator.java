@@ -14,7 +14,7 @@ import javax.sql.DataSource;
 /**
  * Trusted composition only. Re-authenticates through existing F04/V14 on EVERY operation.
  * No reusable authorization input, caller-supplied subject, physical identifier or arbitrary SQL.
- * Fresh next-operation decisions, not universal concurrent revocation/draining of already admitted reads.
+ * Bounded reads participate in the lifecycle suspension barrier; no arbitrary SQL or streaming is admitted.
  */
 public final class BranchReadCoordinator {
     private final JdbcTenantAuthorization authorization;
@@ -30,11 +30,20 @@ public final class BranchReadCoordinator {
 
     public BranchView read(String username, char[] password, Scope selected) {
         try {
-            var decision = authorization.evaluate(username, password, selected);
-            if (decision.outcome() != JdbcTenantAuthorization.Outcome.ALLOWED) {
+            // Reject unauthorized selectors before reserving a business connection, preserving pool isolation.
+            if (authorization.evaluate(username, password, selected).outcome() != JdbcTenantAuthorization.Outcome.ALLOWED) {
                 throw new ContextRejectedException();
             }
             return transactions.readBranch(connection -> {
+                // Hold shared admission through COMMIT. Evaluate F04 and tenant state only after acquiring it.
+                try (var barrier = connection.createStatement()) {
+                    barrier.setQueryTimeout(5);
+                    barrier.execute("SELECT pg_advisory_xact_lock_shared(410023,1)");
+                }
+                var decision = authorization.evaluate(username, password, selected);
+                if (decision.outcome() != JdbcTenantAuthorization.Outcome.ALLOWED) {
+                    throw new ContextRejectedException();
+                }
                 var operation = OperationIdentity.pending();
                 var proof = ProtectedBranchRead.issue(connection, emitter, operation, decision);
                 try {

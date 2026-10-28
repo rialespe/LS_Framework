@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TenantAdministration } from './TenantAdministration'
 import { Brand } from '../components/Brand'
 import { coreApi, CoreFailure } from './coreApi'
 import type { Administrator, RegisteredTenant, RegistrationResult } from './coreApi'
@@ -12,6 +13,8 @@ export function ConnectedCore() {
   const [tenant, setTenant] = useState<RegisteredTenant | null>(null)
   const [uncertain, setUncertain] = useState(() => Boolean(sessionStorage.getItem('ls.core.pending-registration')))
   const [kind, setKind] = useState('')
+  const [section, setSection] = useState<'new' | 'admin'>('new')
+  const [canRegister, setCanRegister] = useState(true)
   const [menu, setMenu] = useState(false)
   // Only a reconciliation reference, never a session token, password, tenant or identity.
   const [reference, setReference] = useState(() => sessionStorage.getItem('ls.core.pending-registration'))
@@ -29,7 +32,7 @@ export function ConnectedCore() {
     working.current = true
     const current = ++generation.current
     clear(); setPhase('checking')
-    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setPhase(result.canRegister ? 'workspace' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
+    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setCanRegister(result.canRegister); if (!result.canRegister && result.canAdmin) { setSection('admin') }; setPhase(result.canRegister || result.canAdmin ? 'workspace' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
     catch (error) { if (current === generation.current) { failure(error) } }
     finally { working.current = false }
   }, [clear, failure])
@@ -48,7 +51,7 @@ export function ConnectedCore() {
   }
   const login = (form: HTMLFormElement) => {
     const values = new FormData(form); const username = String(values.get('username')); const password = String(values.get('password')); form.reset()
-    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setPhase(authority.canRegister ? 'workspace' : 'denied') }
+    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setCanRegister(authority.canRegister); if (!authority.canRegister && authority.canAdmin) { setSection('admin') }; setPhase(authority.canRegister || authority.canAdmin ? 'workspace' : 'denied') }
       catch { clear(); setPhase('login'); setMessage('Acceso no disponible. Revisa tus datos y tu autorización.') } })
   }
   const lookup = (form: HTMLFormElement) => {
@@ -82,16 +85,17 @@ export function ConnectedCore() {
     void run(async () => { try { await coreApi.logout(); setPhase('login'); setMessage('Sesión cerrada.') } catch (error) { failure(error) } })
   }
   return <div><header className="topbar"><Brand onHome={() => { void refresh() }} /><button className="menu-toggle" aria-label="Menú" onClick={() => setMenu(!menu)}>Menú</button>
-    <nav className={menu ? 'navigation open' : 'navigation'} aria-label="Administración LS Core">{phase === 'workspace' && <button aria-current="page">Empresas → Nueva empresa</button>}</nav>
+    <nav className={menu ? 'navigation open' : 'navigation'} aria-label="Administración LS Core">{phase === 'workspace' && <><button aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}>Empresas → Administración de empresas</button>{canRegister && <button aria-current={section === 'new' ? 'page' : undefined} onClick={() => setSection('new')}>Empresas / Nueva empresa</button>}</>}</nav>
     <div className="workspace"><span>LS Core<small>Administración autenticada</small></span></div></header>
-    <main className="main"><div className="page-heading"><div><p className="eyebrow">LS SOLUCIONES / EMPRESAS</p><h1>Nueva empresa</h1><p>Registro inicial. La activación corresponde a una etapa posterior.</p></div>
+    <main className="main core-main"><div className="page-heading"><div><p className="eyebrow">LS SOLUCIONES / EMPRESAS</p><h1>{section === 'admin' ? 'Empresas' : 'Nueva empresa'}</h1><p>LS Core → Administración segura de empresas.</p></div>
       {phase === 'workspace' && <div className="pilot-actions"><span>{kind}</span><button className="button" disabled={busy} onClick={() => { void refresh() }}>Revalidar acceso</button><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button></div>}</div>
       {message && <p role="status" className="pilot-message">{message}</p>}{(busy || phase === 'checking') && <p role="status">Consultando el servidor…</p>}
       {phase === 'login' && <form className="access-panel" onSubmit={e => { e.preventDefault(); login(e.currentTarget) }}><h2>Acceso independiente a LS Core</h2>
         <div className="access-field"><label htmlFor="core-user">Usuario</label><input id="core-user" name="username" autoComplete="username" required disabled={busy} /></div>
         <div className="access-field"><label htmlFor="core-password">Contraseña</label><input id="core-password" name="password" type="password" autoComplete="current-password" required maxLength={1024} disabled={busy} /></div><button className="button" disabled={busy}>Ingresar</button></form>}
       {phase === 'denied' && <section className="preview-panel"><p>Se requiere autoridad global expresamente habilitada.</p><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button><button className="button" onClick={() => { void refresh() }}>Comprobar acceso</button></section>}
-      {phase === 'workspace' && <div className="context-layout"><div className="context-steps">
+      {phase === 'workspace' && section === 'admin' && <TenantAdministration />}
+      {phase === 'workspace' && section === 'new' && canRegister && <div className="context-layout"><div className="context-steps">
         {!tenant && !uncertain && <><form className="preview-panel" onSubmit={e => { e.preventDefault(); lookup(e.currentTarget) }}><h2>Administrador inicial</h2><p>Identifica un usuario existente por su nombre exacto. Para una identidad nueva, utiliza F04 antes del alta.</p>
           <div className="access-field"><label htmlFor="core-admin">Usuario del administrador</label><input id="core-admin" name="administrator" required disabled={busy} maxLength={1024} onChange={() => setAdministrator(null)} /></div><button className="button" disabled={busy}>Buscar identidad</button>
           {administrator && <p>{administrator.displayName} · {administrator.status}</p>}</form>

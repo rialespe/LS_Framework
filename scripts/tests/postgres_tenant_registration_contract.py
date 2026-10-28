@@ -7,7 +7,7 @@ from postgres_application_login_contract import main, run_login_integration
 from postgres_platform_privileged_contract import prepare_platform_privileged
 
 
-def test_tenant_registration(cluster):
+def test_tenant_registration(cluster, test_class='TenantRegistrationPostgresTest'):
     prepare_platform_privileged(cluster)
     reply = ''
     for role in ('ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'):
@@ -22,13 +22,16 @@ def test_tenant_registration(cluster):
                 print(line.encode('ascii', errors='backslashreplace').decode('ascii'))
     check(migrated.returncode == 0, 'restricted V22 migration')
     check(cluster.flyway('validate', location=SOURCE, target='22').returncode == 0, 'intact history through V22')
+    if test_class == 'TenantLifecyclePostgresTest':
+        from postgres_tenant_lifecycle_contract import prepare_lifecycle
+        prepare_lifecycle(cluster)
     reply = ''
     for role in ('ls_core_platform_mutator_dev', 'ls_core_platform_security_log_dev'):
         cluster.secrets[role] = secrets.token_urlsafe(32)
         reply += (cluster.secrets[role] + '\n') * 2
     check(cluster.psql(script=ROOT / 'scripts/migrations/activate_platform_executor.sql', apply=True, reply=reply).returncode == 0, 'owned F06 fixture channel')
     try:
-        run_login_integration(cluster, 'TenantRegistrationPostgresTest')
+        run_login_integration(cluster, test_class)
     finally:
         check(cluster.psql(script=ROOT / 'scripts/migrations/deactivate_platform_executor.sql', apply=True).returncode == 0, 'exceptional F06 fixture channel retired')
     check(cluster.psql(script=ROOT / 'scripts/migrations/seal_platform_bootstrap.sql', apply=True).returncode == 0, 'bootstrap sealed')
