@@ -8,7 +8,7 @@ from test_postgres_migrations import BACKEND, ROOT, SOURCE, check, environment
 from postgres_application_login_contract import main
 
 
-def test_platform_owner(cluster):
+def prepare_platform_owner(cluster):
     check(cluster.port not in (5432, 55432), 'platform uses owned ephemeral PG17 only')
     check(cluster.flyway('migrate', location=SOURCE, target='18').returncode == 0, 'intact V1-V18 prerequisites')
     reply = ''
@@ -22,6 +22,10 @@ def test_platform_owner(cluster):
         print((result.stdout + result.stderr)[-4000:])
     check(result.returncode == 0, 'restricted migrator applies V19')
     check(cluster.flyway('validate', location=SOURCE, target='19').returncode == 0, 'Flyway validates V1-V19')
+
+
+def test_platform_owner(cluster):
+    prepare_platform_owner(cluster)
     env = {key: value for key, value in environment().items() if not key.upper().startswith(('LS_LOGIN_', 'LS_PLATFORM_', 'LS_AUTHENTICATION_'))}
     env.update(LS_LOGIN_TEST_ROOT=str(cluster.root), LS_LOGIN_TEST_PORT=str(cluster.port))
     for role, password in cluster.secrets.items():

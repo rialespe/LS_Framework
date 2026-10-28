@@ -758,6 +758,8 @@ def main():
         for path in [cluster.root / 'server.log', *SOURCE.glob('*.sql')]:
             check(not any(secret in path.read_text(encoding='utf-8', errors='replace')
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
+    from postgres_platform_concurrency_contract import main as concurrency_main
+    concurrency_main('PlatformConcurrencyPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 
