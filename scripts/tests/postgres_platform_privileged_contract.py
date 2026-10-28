@@ -9,12 +9,16 @@ from postgres_application_login_contract import main
 from postgres_platform_owner_contract import prepare_platform_owner
 
 
-def test_platform_privileged(cluster):
+def prepare_platform_privileged(cluster):
     prepare_platform_owner(cluster)
     for script, version in [('prepare_platform_mutator.sql', '20'), ('prepare_platform_audit.sql', '21')]:
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True).returncode == 0, 'dormant channels before V' + version)
         check(cluster.flyway('migrate', location=SOURCE, target=version).returncode == 0, 'restricted migrator applies V' + version)
     check(cluster.flyway('validate', location=SOURCE, target='21').returncode == 0, 'V1-V21 validation without historical edits')
+
+
+def test_platform_privileged(cluster):
+    prepare_platform_privileged(cluster)
     roles = ('ls_core_platform_mutator_dev', 'ls_core_platform_security_log_dev')
     reply = ''
     for role in roles:

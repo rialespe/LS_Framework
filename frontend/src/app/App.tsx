@@ -7,6 +7,7 @@ import { ContextPreview } from './ContextPreview'
 import { SessionsPreview } from './SessionsPreview'
 import { GlobalPortalPreview } from './GlobalPortalPreview'
 import { ConnectedCatalog } from './ConnectedCatalog'
+import { ConnectedCore } from './ConnectedCore'
 import { ConnectedFiscal } from './ConnectedFiscal'
 import { DirectoryView } from './DirectoryView'
 import { descriptions, icons, sections } from './demo'
@@ -21,6 +22,7 @@ type Preview = keyof typeof previews
 type NavigationSection = Section | Preview | 'Portal global (demo)' | 'Catálogo global (BD) · Solo lectura'
 
 export function App() {
+  if (import.meta.env.VITE_CORE_REGISTRATION === 'true' && window.location.pathname === '/core') { return <ConnectedCore /> }
   return import.meta.env.DEV && import.meta.env.VITE_CONNECTED_PILOT === 'true' ? <ConnectedFiscal /> : <DemoApp />
 }
 

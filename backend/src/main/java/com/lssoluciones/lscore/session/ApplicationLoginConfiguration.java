@@ -2,7 +2,6 @@ package com.lssoluciones.lscore.session;
 
 import com.lssoluciones.lscore.identity.application.PasswordAuthentication;
 import java.time.Duration;
-import java.util.Map;
 import java.util.UUID;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -40,13 +39,25 @@ public class ApplicationLoginConfiguration {
         source.setApplicationName("ls-core-application-sessions");
         source.setConnectTimeout(3);
         source.setSocketTimeout(5);
-        return new JdbcApplicationSessions(source, authentication, Map.of(
-                LoginApplication.FISCAL, UUID.fromString(required(environment, "ls.login.fiscal.application-id")),
-                LoginApplication.POS, UUID.fromString(required(environment, "ls.login.pos.application-id"))),
-                Duration.ofSeconds(environment.getProperty("ls.login.session-seconds", Long.class, 28800L)),
-                environment.getProperty("ls.login.multidevice.enabled", Boolean.class, false) ? Map.of(
-                        LoginApplication.FISCAL, Duration.ofSeconds(environment.getProperty("ls.login.fiscal.idle-seconds", Long.class, 1800L)),
-                        LoginApplication.POS, Duration.ofSeconds(environment.getProperty("ls.login.pos.idle-seconds", Long.class, 900L))) : null);
+        var applications = new java.util.EnumMap<LoginApplication, UUID>(LoginApplication.class);
+        var idle = new java.util.EnumMap<LoginApplication, Duration>(LoginApplication.class);
+        applications.put(LoginApplication.FISCAL, UUID.fromString(required(environment, "ls.login.fiscal.application-id")));
+        applications.put(LoginApplication.POS, UUID.fromString(required(environment, "ls.login.pos.application-id")));
+        boolean multidevice = environment.getProperty("ls.login.multidevice.enabled", Boolean.class, false);
+        boolean core = environment.getProperty("ls.login.core.enabled", Boolean.class, false);
+        if (core) {
+            if (!multidevice) {
+                throw new IllegalStateException("LS Core requires effective inactivity expiration");
+            }
+            applications.put(LoginApplication.CORE, UUID.fromString(required(environment, "ls.login.core.application-id")));
+        }
+        for (var app : applications.keySet()) {
+            String slug = app.name().toLowerCase(java.util.Locale.ROOT);
+            idle.put(app, Duration.ofSeconds(environment.getProperty("ls.login." + slug + ".idle-seconds", Long.class,
+                    app == LoginApplication.POS ? 900L : 1800L)));
+        }
+        return new JdbcApplicationSessions(source, authentication, applications,
+                Duration.ofSeconds(environment.getProperty("ls.login.session-seconds", Long.class, 28800L)), multidevice ? idle : null);
     }
 
     @Bean
@@ -62,8 +73,8 @@ public class ApplicationLoginConfiguration {
     }
 
     @Bean
-    FilterRegistrationBean<ApplicationLoginFilter> applicationLoginCsrf() {
-        var registration = new FilterRegistrationBean<>(new ApplicationLoginFilter());
+    FilterRegistrationBean<ApplicationLoginFilter> applicationLoginCsrf(Environment environment) {
+        var registration = new FilterRegistrationBean<>(new ApplicationLoginFilter(environment.getProperty("ls.login.core.enabled", Boolean.class, false)));
         registration.addUrlPatterns("/api/auth/*");
         registration.setOrder(0);
         return registration;
