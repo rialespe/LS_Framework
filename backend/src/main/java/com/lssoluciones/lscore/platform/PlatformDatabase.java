@@ -5,7 +5,7 @@ import java.sql.SQLException;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.core.env.Environment;
 
-/** Fixed installation/reader principals; never selected by HTTP or by a claimed user UUID. */
+/** Fixed installation, reader and controlled executor principals; never selected by HTTP or by a claimed user UUID. */
 final class PlatformDatabase {
     private PlatformDatabase() { }
 
@@ -41,7 +41,8 @@ final class PlatformDatabase {
                 + "AND NOT EXISTS(SELECT FROM pg_shdepend WHERE refclassid='pg_authid'::regclass AND refobjid=r.oid AND deptype='o') "
                 + "FROM pg_roles r WHERE rolname=session_user AND current_database()='ls_core_dev' "
                 + "AND current_setting('server_version_num')::integer BETWEEN 170000 AND 179999")) {
-            statement.setInt(1, JdbcPlatformBootstrap.ROLE.equals(role) ? 1 : 3);
+            statement.setInt(1, JdbcPlatformBootstrap.ROLE.equals(role) ? 1
+                    : PlatformMutationCoordination.ROLE.equals(role) || JdbcPlatformExecutor.SECURITY_LOG_ROLE.equals(role) ? 2 : 3);
             statement.setQueryTimeout(5);
             try (var rows = statement.executeQuery()) {
                 if (!rows.next() || !role.equals(rows.getString(1)) || !role.equals(rows.getString(2)) || !rows.getBoolean(3)) {

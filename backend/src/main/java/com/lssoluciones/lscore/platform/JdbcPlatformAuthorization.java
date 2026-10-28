@@ -80,7 +80,7 @@ public final class JdbcPlatformAuthorization {
     }
 
     public void execute(Proposal proposal) {
-        // Intentionally no flag, writer role, SQL mutation, HTTP mapping or alternative CLI.
+        // A declarative proposal never executes. Only the separate password-confirming internal executor may mutate.
         throw new MutationDisabled();
     }
 
@@ -139,7 +139,7 @@ public final class JdbcPlatformAuthorization {
 
     public static final class MutationDisabled extends RuntimeException {
         private MutationDisabled() {
-            super("Global mutations disabled pending LFD-39");
+            super("Proposal execution disabled; controlled reauthentication required");
         }
     }
 }

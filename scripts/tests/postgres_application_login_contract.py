@@ -19,7 +19,10 @@ def test_application_login(cluster, test_class='ApplicationLoginPostgresTest'):
         print((migrated.stdout + migrated.stderr)[-5000:])
     check(migrated.returncode == 0, 'restricted migrator applies V16')
     check(cluster.flyway('validate', location=SOURCE, target='16').returncode == 0, 'Flyway validates V1-V16')
-    if test_class == 'PlatformConcurrencyPostgresTest':
+    if test_class == 'PlatformPrivilegedPostgresTest':
+        from postgres_platform_privileged_contract import test_platform_privileged
+        test_platform_privileged(cluster)
+    elif test_class == 'PlatformConcurrencyPostgresTest':
         from postgres_platform_concurrency_contract import test_platform_concurrency
         test_platform_concurrency(cluster)
     elif test_class == 'PlatformOwnerPostgresTest':

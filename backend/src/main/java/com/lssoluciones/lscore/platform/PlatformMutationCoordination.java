@@ -5,7 +5,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
-/** Internal preparation only. No bean, executor, HTTP adapter or operational writer credentials. */
+/** Transaction-local coordination for the controlled executor. No bean, HTTP adapter or reusable proof. */
 final class PlatformMutationCoordination {
     static final String ROLE = "ls_core_platform_mutator_dev";
 

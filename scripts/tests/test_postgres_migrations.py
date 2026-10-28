@@ -760,6 +760,8 @@ def main():
                           for secret in cluster.secrets.values()), 'no plaintext ephemeral password in ' + path.name)
     from postgres_platform_concurrency_contract import main as concurrency_main
     concurrency_main('PlatformConcurrencyPostgresTest')
+    from postgres_platform_privileged_contract import main as privileged_main
+    privileged_main('PlatformPrivilegedPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 
