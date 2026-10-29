@@ -58,7 +58,7 @@ final class ApplicationLoginFilter implements Filter {
         for (var application : LoginApplication.values()) {
             if (path.startsWith(application.path() + "/") && filters.containsKey(application)) {
                 if (application == LoginApplication.CORE && !path.substring(application.path().length()).matches(
-                        "/(csrf|login|session|logout|authority|tenant-authority|tenant-operations/[0-9a-fA-F-]{36}|tenants(?:/[0-9a-fA-F-]{36}(?:/(?:activate|suspend|reactivate))?)?|initial-administrator|registrations(?:/[0-9a-fA-F-]{36})?)")) {
+                        "/(csrf|login|session|logout|authority|tenant-authority|administrator-tenants|administrator-operations/[0-9a-fA-F-]{36}|tenants/[0-9a-fA-F-]{36}/administrators(?:/(?:candidate|designate|[0-9a-fA-F-]{36}(?:/(?:activate|revoke|replace))?))?|tenant-operations/[0-9a-fA-F-]{36}|tenants(?:/[0-9a-fA-F-]{36}(?:/(?:activate|suspend|reactivate))?)?|initial-administrator|registrations(?:/[0-9a-fA-F-]{36})?)")) {
                     reject(output, 404);
                     return;
                 }

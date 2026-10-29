@@ -22,9 +22,11 @@ def test_tenant_registration(cluster, test_class='TenantRegistrationPostgresTest
                 print(line.encode('ascii', errors='backslashreplace').decode('ascii'))
     check(migrated.returncode == 0, 'restricted V22 migration')
     check(cluster.flyway('validate', location=SOURCE, target='22').returncode == 0, 'intact history through V22')
-    if test_class == 'TenantLifecyclePostgresTest':
+    if test_class in ('TenantRegistrationPostgresTest', 'TenantLifecyclePostgresTest', 'TenantAdministratorsPostgresTest'):
         from postgres_tenant_lifecycle_contract import prepare_lifecycle
         prepare_lifecycle(cluster)
+        from postgres_tenant_administrators_contract import prepare_administrators
+        prepare_administrators(cluster)
     reply = ''
     for role in ('ls_core_platform_mutator_dev', 'ls_core_platform_security_log_dev'):
         cluster.secrets[role] = secrets.token_urlsafe(32)

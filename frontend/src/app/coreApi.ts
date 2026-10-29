@@ -11,20 +11,25 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   }
   const response = await fetch('/api/auth/core/' + action, { credentials: 'same-origin', cache: 'no-store',
     method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) })
-  if (!response.ok && !(resultBody && [403, 409, 422, 503].includes(response.status))) { throw new CoreFailure(response.status) }
+  if (!response.ok && !(resultBody && [403, 404, 409, 422, 503].includes(response.status))) { throw new CoreFailure(response.status) }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
 }
 export const coreApi = {
   async login(username: string, password: string) { await request('login', { username, password }); await request('csrf') },
-  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean }> {
+  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean }> {
     await request('session')
     try { return await request<{ kind: string; canRegister: boolean }>('authority') }
     catch (error) {
       if (!(error instanceof CoreFailure && error.status === 403)) { throw error }
-      const authority = await request<TenantAuthority>('tenant-authority')
-      return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead }
+      try { const authority = await request<TenantAuthority>('tenant-authority'); return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead } }
+      catch (access) { if (!(access instanceof CoreFailure && access.status === 403)) { throw access }; await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } }
     }
   },
+  administratorTenants: () => request<{ id: string; name: string; status: string }[]>('administrator-tenants'),
+  administrators: (tenant: string) => request<AdministratorListing>('tenants/' + encodeURIComponent(tenant) + '/administrators'),
+  administratorCandidate: (tenant: string, username: string) => request<AdministratorCandidate>('tenants/' + encodeURIComponent(tenant) + '/administrators/candidate', { username }),
+  administratorMutation: (tenant: string, action: DesignationAction, target: string | null, requestId: string, username: string | null, password: string) => request<AdministratorResult>('tenants/' + encodeURIComponent(tenant) + '/administrators/' + (target ? encodeURIComponent(target) + '/' : '') + action, { requestId, username, password }, true),
+  administratorOperation: (id: string) => request<AdministratorResult>('administrator-operations/' + encodeURIComponent(id)),
   tenantAuthority: () => request<TenantAuthority>('tenant-authority'),
   tenants: (page = 0) => request<TenantPage>('tenants?page=' + page),
   tenant: (id: string) => request<TenantDetail>('tenants/' + encodeURIComponent(id)),
@@ -43,3 +48,10 @@ export type TenantPage = { tenants: ManagedTenant[]; hasMore: boolean }
 export type TenantChange = { requestId: string; action: string; previousStatus: string; resultingStatus: string; createdAt: string }
 export type TenantDetail = { tenant: ManagedTenant; history: TenantChange[] }
 export type LifecycleResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'DENIED' | 'INVALID_TRANSITION' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: TenantChange | null }
+
+export type DesignationAction = 'designate' | 'activate' | 'revoke' | 'replace'
+export type TenantDesignation = { id: string; userId: string; username: string; displayName: string; identityStatus: string; membershipStatus: string; status: string; revokedAt: string | null; grantedAt: string; valid: boolean }
+export type AdministratorCandidate = { username: string; displayName: string; identityStatus: string; ready: boolean }
+export type AdministratorChange = { requestId: string; tenantId: string; action: string; targetId: string | null; designationId: string; resultingStatus: string; createdAt: string }
+export type AdministratorListing = { administrators: TenantDesignation[]; canManage: boolean; validCount: number; history: AdministratorChange[] }
+export type AdministratorResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: AdministratorChange | null }
