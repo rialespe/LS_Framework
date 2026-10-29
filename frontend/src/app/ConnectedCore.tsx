@@ -67,7 +67,7 @@ export function ConnectedCore() {
     } else { setTenant(null); setUncertain(true); setMessage('Resultado sin confirmar. Conserva la referencia y consulta el resultado antes de otra creación.') }
   }
   const create = (form: HTMLFormElement) => {
-    if (sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-lifecycle')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''; return }
+    if (sessionStorage.getItem('ls.core.pending-configuration') || sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-lifecycle')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''; return }
     if (!administrator || uncertain || tenant || working.current) { return }
     const data = new FormData(form); const name = String(data.get('name')).trim(); const password = String(data.get('confirmation'))
     const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''

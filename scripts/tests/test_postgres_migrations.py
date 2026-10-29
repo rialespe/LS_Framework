@@ -770,6 +770,8 @@ def main():
     administrators_main('TenantAdministratorsPostgresTest')
     from postgres_branch_administration_contract import main as branches_main
     branches_main('BranchAdministrationPostgresTest')
+    from postgres_branch_configuration_contract import main as configuration_main
+    configuration_main('BranchConfigurationPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 

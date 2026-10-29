@@ -43,7 +43,7 @@ public final class PlatformDatabase {
                 + "AND current_setting('server_version_num')::integer BETWEEN 170000 AND 179999")) {
             statement.setInt(1, JdbcPlatformBootstrap.ROLE.equals(role) ? 1
                     : PlatformMutationCoordination.ROLE.equals(role) || JdbcPlatformExecutor.SECURITY_LOG_ROLE.equals(role)
-                    || "ls_core_branch_admin_log_dev".equals(role) || "ls_core_tenant_admin_log_dev".equals(role) || "ls_core_tenant_lifecycle_log_dev".equals(role) || "ls_core_tenant_registration_log_dev".equals(role) ? 2 : 3);
+                    || "ls_core_branch_config_log_dev".equals(role) || "ls_core_branch_admin_log_dev".equals(role) || "ls_core_tenant_admin_log_dev".equals(role) || "ls_core_tenant_lifecycle_log_dev".equals(role) || "ls_core_tenant_registration_log_dev".equals(role) ? 2 : 3);
             statement.setQueryTimeout(5);
             try (var rows = statement.executeQuery()) {
                 if (!rows.next() || !role.equals(rows.getString(1)) || !role.equals(rows.getString(2)) || !rows.getBoolean(3)) {

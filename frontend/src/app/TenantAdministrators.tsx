@@ -67,7 +67,7 @@ export function TenantAdministrators({ tenantId }: { tenantId: string }) {
   }
   const submit = (form: HTMLFormElement) => {
     const password = String(new FormData(form).get('password')); form.reset()
-    if (sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-lifecycle') || sessionStorage.getItem('ls.core.pending-registration')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); return }
+    if (sessionStorage.getItem('ls.core.pending-configuration') || sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-lifecycle') || sessionStorage.getItem('ls.core.pending-registration')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); return }
     if (pending || working.current || busy || !action || !password || ((action === 'designate' || action === 'replace') && !candidate)) { return }
     if (!window.confirm(labels[action] + '. ¿Confirmas esta operación crítica?')) { return }
     const reference = crypto.randomUUID(); sessionStorage.setItem(storageKey, reference); setPending(reference)
