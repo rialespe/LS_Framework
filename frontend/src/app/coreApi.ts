@@ -28,6 +28,10 @@ export const coreApi = {
       catch (access) { if (!(access instanceof CoreFailure && [403, 404].includes(access.status))) { throw access }; try { await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } } catch (scope) { if (!(scope instanceof CoreFailure && [403, 404].includes(scope.status))) { throw scope }; await request('branch-administration/tenants'); return { kind: 'Administración de sucursales autorizada', canRegister: false, canAdmin: true, branchesOnly: true } } }
     }
   },
+  configurationModules: (tenant: string, branch: string) => request<ConfigurationModule[]>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches/' + encodeURIComponent(branch) + '/module-configurations'),
+  configurationDetail: (scope: ConfigurationScope) => request<ConfigurationDetail>(configurationPath(scope)),
+  configurationMutation: (scope: ConfigurationScope, action: ConfigurationAction, requestId: string, expectedRevision: number | null, values: ConfigurationValues, password: string) => request<ConfigurationResult>(configurationPath(scope) + '/' + action, { requestId, expectedRevision, values, password }, true),
+  configurationOperation: (id: string) => request<ConfigurationResult>('branch-administration/configuration-operations/' + encodeURIComponent(id)),
   branchTenants: () => request<{ id: string; name: string; status: string }[]>('branch-administration/tenants'),
   branches: (tenant: string, page = 0) => request<BranchPage>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches?page=' + page),
   branch: (tenant: string, id: string) => request<BranchDetail>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches/' + encodeURIComponent(id)),
@@ -70,3 +74,14 @@ export type BranchChange = { requestId: string; tenantId: string; action: string
 export type BranchPage = { branches: ManagedBranch[]; hasMore: boolean; canManage: boolean }
 export type BranchDetail = { branch: ManagedBranch; canManage: boolean; codeEditable: boolean; history: BranchChange[] }
 export type BranchResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: BranchChange | null }
+
+export type ConfigurationScope = { tenantId: string; branchId: string; applicationId: string; moduleId: string; version: number }
+export type ConfigurationValues = Record<string, string | number | boolean>
+export type ConfigurationField = { key: string; label: string; type: 'TEXT' | 'INTEGER' | 'BOOLEAN'; required: boolean; maxLength: number | null; minimum: number | null; maximum: number | null }
+export type ConfigurationModule = { scope: ConfigurationScope; applicationName: string; moduleName: string; contractStatus: string; applicationPublished: boolean; modulePublished: boolean; applicationEnabled: boolean; moduleEnabled: boolean; available: boolean; contextActive: boolean; canRead: boolean; canManage: boolean; readiness: string; revision: number | null; fields: ConfigurationField[] }
+export type ModuleConfiguration = { scope: ConfigurationScope; values: ConfigurationValues; readiness: string; revision: number; updatedAt: string }
+export type ConfigurationChange = { requestId: string; action: string; previousReadiness: string | null; configuration: ModuleConfiguration }
+export type ConfigurationDetail = { module: ConfigurationModule; configuration: ModuleConfiguration | null; missingFields: string[]; history: ConfigurationChange[] }
+export type ConfigurationAction = 'prepare' | 'update' | 'validate'
+export type ConfigurationResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'MODULE_UNAVAILABLE' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: ConfigurationChange | null; missingFields: string[] }
+function configurationPath(scope: ConfigurationScope) { return 'branch-administration/tenants/' + encodeURIComponent(scope.tenantId) + '/branches/' + encodeURIComponent(scope.branchId) + '/module-configurations/' + encodeURIComponent(scope.applicationId) + '/' + encodeURIComponent(scope.moduleId) + '/' + scope.version }

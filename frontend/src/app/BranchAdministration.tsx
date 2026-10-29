@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { BranchModuleConfiguration } from './BranchModuleConfiguration'
 import { coreApi, CoreFailure } from './coreApi'
 import type { BranchAction, BranchDetail, BranchPage, BranchResult } from './coreApi'
 
@@ -12,13 +13,14 @@ const notices: Record<string, string> = {
   UNAVAILABLE: 'Servicio no disponible. El servidor no confirmó la operación. Revalida la información antes de intentar otro cambio.',
 }
 const pendingKey = 'ls.core.pending-branch'
-const otherPending = () => ['ls.core.pending-administrator', 'ls.core.pending-lifecycle', 'ls.core.pending-registration'].some(key => sessionStorage.getItem(key))
+const otherPending = () => ['ls.core.pending-configuration', 'ls.core.pending-administrator', 'ls.core.pending-lifecycle', 'ls.core.pending-registration'].some(key => sessionStorage.getItem(key))
 
 export function BranchAdministration() {
   const [companies, setCompanies] = useState<{ id: string; name: string; status: string }[]>([])
   const [tenant, setTenant] = useState('')
   const [page, setPage] = useState(0)
   const [data, setData] = useState<BranchPage | null>(null)
+  const [showModules, setShowModules] = useState(false)
   const [detail, setDetail] = useState<BranchDetail | null>(null)
   const [action, setAction] = useState<BranchAction | null>(null)
   const [message, setMessage] = useState('')
@@ -104,7 +106,7 @@ export function BranchAdministration() {
         {action === 'close' && <p role="alert">El cierre es terminal. Se revocarán los contextos de esta sucursal y se conservará el historial.</p>}{action === 'suspend' && <p>Se revocarán solo los contextos de esta sucursal. Las otras sucursales y empresas se conservan.</p>}
         <label htmlFor="branch-password">Confirmar contraseña para sucursal</label><input id="branch-password" name="password" type="password" autoComplete="current-password" required maxLength={1024} disabled={busy} /><div className="tenant-actions"><button className="button primary" disabled={busy}>Confirmar cambio de sucursal</button><button className="button" type="button" disabled={busy} onClick={() => setAction(null)}>Cancelar</button></div>
       </form>}
-      {detail && <><h4>Historial de sucursal</h4><ol className="tenant-history">{detail.history.map(change => <li key={change.requestId}><strong>{change.action} · {change.previousStatus ? states[change.previousStatus] + ' → ' : ''}{states[change.branch.status]}</strong><small>{change.previousCode ?? 'Nueva'} → {change.branch.code} · {change.branch.name}</small><small>{new Date(change.createdAt).toLocaleString('es-CL')}</small><small>Referencia: {change.requestId}</small></li>)}</ol></>}
+      {detail && <><button className="button" disabled={busy} onClick={() => setShowModules(!showModules)}>Configuración por módulos</button>{showModules && <BranchModuleConfiguration key={b!.id} tenantId={tenant} branchId={b!.id} branchStatus={b!.status} />}<h4>Historial de sucursal</h4><ol className="tenant-history">{detail.history.map(change => <li key={change.requestId}><strong>{change.action} · {change.previousStatus ? states[change.previousStatus] + ' → ' : ''}{states[change.branch.status]}</strong><small>{change.previousCode ?? 'Nueva'} → {change.branch.code} · {change.branch.name}</small><small>{new Date(change.createdAt).toLocaleString('es-CL')}</small><small>Referencia: {change.requestId}</small></li>)}</ol></>}
     </section>}
     </div>}
   </section>

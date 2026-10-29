@@ -359,3 +359,8 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
 .branch-form { display: grid; gap: .75rem; }
 .branch-form input[readonly] { background: #edf2f7; }
 .state-closed { background: #e7eaf0; color: #46546b; }
+
+.branch-module-configuration { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #dbe3ee; min-width: 0; }
+.module-configuration-card { padding: 1rem; border: 1px solid #dbe3ee; border-radius: .75rem; margin: 1rem 0; background: #f7fafc; overflow-wrap: anywhere; }
+.configuration-field { display: grid; gap: .5rem; }
+.configuration-field select { padding: .75rem; border: 1px solid #a8b6c9; border-radius: .5rem; background: white; color: #162d48; width: 100%; }

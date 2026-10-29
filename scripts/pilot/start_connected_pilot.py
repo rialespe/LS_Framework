@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V25, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V26, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -50,7 +50,8 @@ def prepare_database(cluster):
             (['ls_core_tenant_registrar_dev', 'ls_core_tenant_registration_log_dev'], 'prepare_tenant_registration.sql', '22'),
             (['ls_core_tenant_lifecycle_dev', 'ls_core_tenant_lifecycle_log_dev'], 'prepare_tenant_lifecycle.sql', '23'),
             (['ls_core_tenant_admin_dev', 'ls_core_tenant_admin_log_dev'], 'prepare_tenant_administrators.sql', '24'),
-            (['ls_core_branch_admin_dev', 'ls_core_branch_admin_log_dev'], 'prepare_branch_administration.sql', '25')]:
+            (['ls_core_branch_admin_dev', 'ls_core_branch_admin_log_dev'], 'prepare_branch_administration.sql', '25'),
+            (['ls_core_branch_config_dev', 'ls_core_branch_config_log_dev'], 'prepare_branch_configuration.sql', '26')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -58,7 +59,7 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='25').returncode == 0, 'Flyway validates V1-V25')
+    check(cluster.flyway('validate', location=SOURCE, target='26').returncode == 0, 'Flyway validates V1-V26')
 
 
 def core_smoke(opener, username, initial_username, second_username, password, cluster):
@@ -133,8 +134,42 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
     check(get(branch_path + '/' + branches[0])['branch']['status'] == 'ACTIVE', 'matrix preserved while second branch closes')
     for selected in branches:
         check(cluster.query("SELECT tenant_id FROM tenant.branches WHERE id='" + selected + "'") == tenant_id, 'PG17 confirms exact tenant ownership for branch')
+    modules_path = branch_path + '/' + branches[0] + '/module-configurations'
+    check(get(modules_path) == [], 'real empty specialized configuration registry before fixture')
+    install_configuration_fixture(cluster, tenant_id)
+    module = get(modules_path)[0]
+    check(module['readiness'] == 'ABSENT' and 'FIXTURE' in module['applicationName'], 'explicit disposable fixture distinguished from product catalog')
+    scope = module['scope']
+    config_path = modules_path + '/' + scope['applicationId'] + '/' + scope['moduleId'] + '/1'
+    def configuration(action, revision, values):
+        operation = str(uuid.uuid4())
+        with post(config_path + '/' + action, {'requestId': operation, 'expectedRevision': revision, 'values': values, 'password': password}) as response:
+            check(json.load(response)['outcome'] == 'CONFIRMED', 'real fixture configuration ' + action)
+        check(get('branch-administration/configuration-operations/' + operation)['outcome'] == 'CONFIRMED', 'configuration receipt persisted')
+    configuration('prepare', None, {})
+    try:
+        post(config_path + '/validate', {'requestId': str(uuid.uuid4()), 'expectedRevision': 1, 'password': password})
+        raise RuntimeError('Incomplete fixture must not become READY')
+    except urllib.error.HTTPError as rejected:
+        check(rejected.code == 422, 'incomplete draft rejected for READY')
+        rejected.close()
+    configuration('update', 1, {'label': 'Disposable example', 'capacity': 2, 'verified': False})
+    configuration('validate', 2, {})
+    check(get(config_path)['configuration']['readiness'] == 'READY', 'persisted READY for fixture contract only')
+    check(cluster.query("SELECT count(*) FROM tenant.branch_configurations WHERE tenant_id='" + tenant_id + "' AND branch_id='" + branches[0] + "'") == '1', 'PG17 confirms configuration scope')
+    check(cluster.query("SELECT count(*) FROM tenant.branch_configurations WHERE tenant_id<>'" + tenant_id + "'") == '0', 'no configuration was assigned to other tenants')
     with post('logout', {}) as response:
         check(response.status == 204, 'Core logout confirmed')
+
+
+def install_configuration_fixture(cluster, tenant_id):
+    import uuid
+    selected = str(uuid.UUID(tenant_id))
+    check(cluster.port not in (5432, 55432), 'configuration fixture uses owned ephemeral endpoint')
+    check(cluster.query("SELECT count(*) FROM tenant.initial_registrations r JOIN tenant.tenants t ON t.id=r.tenant_id JOIN platform.administrators a ON a.user_id=r.actor_user_id WHERE t.id='" + selected + "' AND t.status='ACTIVE' AND a.administrator_kind='OWNER' AND a.status='ACTIVE' AND a.revoked_at IS NULL") == '1', 'fixture targets an explicit active company registered by the disposable owner')
+    check(cluster.query("SELECT count(*) FROM catalog.applications WHERE code='fixture-config-lfd44'") == '0', 'fixture installation is explicit and never overwrites a contract')
+    result = cluster.psql(sql=(ROOT / 'scripts/pilot/branch_configuration_fixture.sql').read_text(encoding='utf-8').replace('__TENANT__', selected))
+    check(result.returncode == 0, 'DISPOSABLE FIXTURE ONLY: typed configuration schema and entitlements installed for selected tenant')
 
 
 def main():
@@ -206,7 +241,7 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true',
+                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
                 for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
                                      ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev'),
@@ -215,7 +250,9 @@ def main():
                                      ('LS_TENANT_ADMIN_DB_', 'ls_core_tenant_admin_dev'),
                                      ('LS_TENANT_ADMIN_LOG_DB_', 'ls_core_tenant_admin_log_dev'),
                                      ('LS_BRANCH_ADMIN_DB_', 'ls_core_branch_admin_dev'),
-                                     ('LS_BRANCH_ADMIN_LOG_DB_', 'ls_core_branch_admin_log_dev')]:
+                                     ('LS_BRANCH_ADMIN_LOG_DB_', 'ls_core_branch_admin_log_dev'),
+                                     ('LS_BRANCH_CONFIG_DB_', 'ls_core_branch_config_dev'),
+                                     ('LS_BRANCH_CONFIG_LOG_DB_', 'ls_core_branch_config_log_dev')]:
                     env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev', prefix + 'PASSWORD': cluster.secrets[role]})
             backend_env = dict(env)
             frontend_env = {key: value for key, value in env.items() if not key.startswith(('LS_', 'SERVER_'))}
@@ -275,6 +312,20 @@ def main():
                         check(isinstance(json.load(response), list), 'real ' + endpoint + ' response through proxy')
                 request = urllib.request.Request(URL + '/api/auth/fiscal/logout', method='POST', headers={'X-CSRF-TOKEN': csrf})
                 check(opener.open(request, timeout=10).status == 204, 'real logout through proxy')
+            elif options.core:
+                print('Catalogo real sin contratos especializados. Para un ejemplo NO PRODUCTIVO, crea y activa una empresa en la UI.', flush=True)
+                print('Comando: fixture-config <UUID_EMPRESA> | salir. El fixture se instala solo en esa empresa del cluster desechable.', flush=True)
+                while all(child.poll() is None for child in children):
+                    command = input('Piloto Core> ').strip()
+                    if command == 'salir':
+                        break
+                    if command.startswith('fixture-config '):
+                        try:
+                            install_configuration_fixture(cluster, command.removeprefix('fixture-config ').strip())
+                        except (ValueError, AssertionError):
+                            print('Fixture no instalado. Usa una empresa activa creada por el OWNER de este piloto y no repitas una instalacion existente.', flush=True)
+                    else:
+                        print('Comandos disponibles: fixture-config <UUID_EMPRESA> | salir', flush=True)
             else:
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)
