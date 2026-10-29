@@ -353,3 +353,9 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
 .tenant-administrators form { display: grid; gap: .75rem; margin: 1rem 0; }
 .tenant-administrators input, #admin-company { width: 100%; max-width: 42rem; padding: .75rem; border: 1px solid #a8b6c9; border-radius: .5rem; background: white; color: #162d48; }
 .tenant-administrators .tenant-actions { flex-wrap: wrap; }
+
+.branch-selector { display: grid; gap: .5rem; max-width: 42rem; margin: 1.25rem 0; }
+.branch-selector select, .branch-form input { width: 100%; min-width: 0; padding: .75rem; border: 1px solid #a8b6c9; border-radius: .5rem; background: white; color: #162d48; }
+.branch-form { display: grid; gap: .75rem; }
+.branch-form input[readonly] { background: #edf2f7; }
+.state-closed { background: #e7eaf0; color: #46546b; }

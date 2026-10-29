@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { BranchAdministration } from './BranchAdministration'
 import { TenantAdministratorsWorkspace } from './TenantAdministrators'
 import { TenantAdministration } from './TenantAdministration'
 import { Brand } from '../components/Brand'
@@ -14,7 +15,7 @@ export function ConnectedCore() {
   const [tenant, setTenant] = useState<RegisteredTenant | null>(null)
   const [uncertain, setUncertain] = useState(() => Boolean(sessionStorage.getItem('ls.core.pending-registration')))
   const [kind, setKind] = useState('')
-  const [section, setSection] = useState<'new' | 'admin' | 'administrators'>('new')
+  const [section, setSection] = useState<'new' | 'admin' | 'administrators' | 'branches'>('new')
   const [canRegister, setCanRegister] = useState(true)
   const [menu, setMenu] = useState(false)
   // Only a reconciliation reference, never a session token, password, tenant or identity.
@@ -33,7 +34,7 @@ export function ConnectedCore() {
     working.current = true
     const current = ++generation.current
     clear(); setPhase('checking')
-    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setCanRegister(result.canRegister); if (!result.canRegister && result.canAdmin) { setSection(result.tenantOnly ? 'administrators' : 'admin') }; setPhase(result.canRegister || result.canAdmin ? 'workspace' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
+    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setCanRegister(result.canRegister); if (!result.canRegister && result.canAdmin) { setSection(result.branchesOnly ? 'branches' : result.tenantOnly ? 'administrators' : 'admin') }; setPhase(result.canRegister || result.canAdmin ? 'workspace' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
     catch (error) { if (current === generation.current) { failure(error) } }
     finally { working.current = false }
   }, [clear, failure])
@@ -52,7 +53,7 @@ export function ConnectedCore() {
   }
   const login = (form: HTMLFormElement) => {
     const values = new FormData(form); const username = String(values.get('username')); const password = String(values.get('password')); form.reset()
-    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setCanRegister(authority.canRegister); if (!authority.canRegister && authority.canAdmin) { setSection(authority.tenantOnly ? 'administrators' : 'admin') }; setPhase(authority.canRegister || authority.canAdmin ? 'workspace' : 'denied') }
+    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setCanRegister(authority.canRegister); if (!authority.canRegister && authority.canAdmin) { setSection(authority.branchesOnly ? 'branches' : authority.tenantOnly ? 'administrators' : 'admin') }; setPhase(authority.canRegister || authority.canAdmin ? 'workspace' : 'denied') }
       catch { clear(); setPhase('login'); setMessage('Acceso no disponible. Revisa tus datos y tu autorización.') } })
   }
   const lookup = (form: HTMLFormElement) => {
@@ -66,7 +67,7 @@ export function ConnectedCore() {
     } else { setTenant(null); setUncertain(true); setMessage('Resultado sin confirmar. Conserva la referencia y consulta el resultado antes de otra creación.') }
   }
   const create = (form: HTMLFormElement) => {
-    if (sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-lifecycle')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''; return }
+    if (sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-lifecycle')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''; return }
     if (!administrator || uncertain || tenant || working.current) { return }
     const data = new FormData(form); const name = String(data.get('name')).trim(); const password = String(data.get('confirmation'))
     const secretField = form.elements.namedItem('confirmation') as HTMLInputElement; secretField.value = ''
@@ -87,7 +88,7 @@ export function ConnectedCore() {
     void run(async () => { try { await coreApi.logout(); setPhase('login'); setMessage('Sesión cerrada.') } catch (error) { failure(error) } })
   }
   return <div><header className="topbar"><Brand onHome={() => { void refresh() }} /><button className="menu-toggle" aria-label="Menú" onClick={() => setMenu(!menu)}>Menú</button>
-    <nav className={menu ? 'navigation open' : 'navigation'} aria-label="Administración LS Core">{phase === 'workspace' && <><button aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}>Empresas → Administración de empresas</button><button aria-current={section === 'administrators' ? 'page' : undefined} onClick={() => setSection('administrators')}>Empresas / Administradores</button>{canRegister && <button aria-current={section === 'new' ? 'page' : undefined} onClick={() => setSection('new')}>Empresas / Nueva empresa</button>}</>}</nav>
+    <nav className={menu ? 'navigation open' : 'navigation'} aria-label="Administración LS Core">{phase === 'workspace' && <><button aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}>Empresas → Administración de empresas</button><button aria-current={section === 'administrators' ? 'page' : undefined} onClick={() => setSection('administrators')}>Empresas / Administradores</button><button aria-current={section === 'branches' ? 'page' : undefined} onClick={() => setSection('branches')}>Empresas / Sucursales</button>{canRegister && <button aria-current={section === 'new' ? 'page' : undefined} onClick={() => setSection('new')}>Empresas / Nueva empresa</button>}</>}</nav>
     <div className="workspace"><span>LS Core<small>Administración autenticada</small></span></div></header>
     <main className="main core-main"><div className="page-heading"><div><p className="eyebrow">LS SOLUCIONES / EMPRESAS</p><h1>{section === 'new' ? 'Nueva empresa' : 'Empresas'}</h1><p>LS Core → Administración segura de empresas.</p></div>
       {phase === 'workspace' && <div className="pilot-actions"><span>{kind}</span><button className="button" disabled={busy} onClick={() => { void refresh() }}>Revalidar acceso</button><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button></div>}</div>
@@ -96,6 +97,7 @@ export function ConnectedCore() {
         <div className="access-field"><label htmlFor="core-user">Usuario</label><input id="core-user" name="username" autoComplete="username" required disabled={busy} /></div>
         <div className="access-field"><label htmlFor="core-password">Contraseña</label><input id="core-password" name="password" type="password" autoComplete="current-password" required maxLength={1024} disabled={busy} /></div><button className="button" disabled={busy}>Ingresar</button></form>}
       {phase === 'denied' && <section className="preview-panel"><p>Se requiere autoridad global o empresarial expresamente habilitada.</p><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button><button className="button" onClick={() => { void refresh() }}>Comprobar acceso</button></section>}
+      {phase === 'workspace' && section === 'branches' && <BranchAdministration />}
       {phase === 'workspace' && section === 'administrators' && <TenantAdministratorsWorkspace />}
       {phase === 'workspace' && section === 'admin' && <TenantAdministration />}
       {phase === 'workspace' && section === 'new' && canRegister && <div className="context-layout"><div className="context-steps">

@@ -768,6 +768,8 @@ def main():
     lifecycle_main('TenantLifecyclePostgresTest')
     from postgres_tenant_administrators_contract import main as administrators_main
     administrators_main('TenantAdministratorsPostgresTest')
+    from postgres_branch_administration_contract import main as branches_main
+    branches_main('BranchAdministrationPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 
