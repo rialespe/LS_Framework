@@ -58,7 +58,7 @@ export function TenantAdministration() {
   }
   const pendingReference = useRef(pending)
   const submit = async (form: HTMLFormElement) => {
-    if (sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-registration')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); form.reset(); return }
+    if (sessionStorage.getItem('ls.core.pending-branch') || sessionStorage.getItem('ls.core.pending-administrator') || sessionStorage.getItem('ls.core.pending-registration')) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); form.reset(); return }
     if (working.current || !detail || !action || pending) { return }
     const password = String(new FormData(form).get('password')); form.reset()
     if (!password || !window.confirm(labels[action] + ' esta empresa. ¿Confirmas la operación?')) { return }

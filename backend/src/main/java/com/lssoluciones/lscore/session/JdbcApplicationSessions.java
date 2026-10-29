@@ -202,7 +202,8 @@ public final class JdbcApplicationSessions {
                 throw failure;
             }
         } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied | JdbcTenantLifecycle.Denied | JdbcTenantLifecycle.Unavailable
-                | JdbcTenantAdministrators.Denied | JdbcTenantAdministrators.Missing | JdbcTenantAdministrators.Unavailable failure) {
+                | JdbcTenantAdministrators.Denied | JdbcTenantAdministrators.Missing | JdbcTenantAdministrators.Unavailable
+                | JdbcBranchAdministration.Denied | JdbcBranchAdministration.Missing | JdbcBranchAdministration.Unavailable failure) {
             throw failure;
         } catch (SQLException | RuntimeException failure) {
             throw new Rejected();

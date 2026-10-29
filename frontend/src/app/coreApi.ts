@@ -12,19 +12,27 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   const response = await fetch('/api/auth/core/' + action, { credentials: 'same-origin', cache: 'no-store',
     method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) })
   if (!response.ok && !(resultBody && [403, 404, 409, 422, 503].includes(response.status))) { throw new CoreFailure(response.status) }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>
+  if (response.status === 204) { return undefined as T }
+  const result = await response.json()
+  if (resultBody && !response.ok && (!result || typeof result.outcome !== 'string')) { throw new CoreFailure(response.status) }
+  return result as T
 }
 export const coreApi = {
   async login(username: string, password: string) { await request('login', { username, password }); await request('csrf') },
-  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean }> {
+  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean }> {
     await request('session')
     try { return await request<{ kind: string; canRegister: boolean }>('authority') }
     catch (error) {
-      if (!(error instanceof CoreFailure && error.status === 403)) { throw error }
+      if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error }
       try { const authority = await request<TenantAuthority>('tenant-authority'); return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead } }
-      catch (access) { if (!(access instanceof CoreFailure && access.status === 403)) { throw access }; await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } }
+      catch (access) { if (!(access instanceof CoreFailure && [403, 404].includes(access.status))) { throw access }; try { await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } } catch (scope) { if (!(scope instanceof CoreFailure && [403, 404].includes(scope.status))) { throw scope }; await request('branch-administration/tenants'); return { kind: 'Administración de sucursales autorizada', canRegister: false, canAdmin: true, branchesOnly: true } } }
     }
   },
+  branchTenants: () => request<{ id: string; name: string; status: string }[]>('branch-administration/tenants'),
+  branches: (tenant: string, page = 0) => request<BranchPage>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches?page=' + page),
+  branch: (tenant: string, id: string) => request<BranchDetail>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches/' + encodeURIComponent(id)),
+  branchMutation: (tenant: string, action: BranchAction, id: string | null, requestId: string, code: string | null, name: string | null, expectedUpdatedAt: string | null, password: string) => request<BranchResult>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches' + (action === 'create' ? '' : '/' + encodeURIComponent(id!) + '/' + action), { requestId, code, name, expectedUpdatedAt, password }, true),
+  branchOperation: (id: string) => request<BranchResult>('branch-administration/operations/' + encodeURIComponent(id)),
   administratorTenants: () => request<{ id: string; name: string; status: string }[]>('administrator-tenants'),
   administrators: (tenant: string) => request<AdministratorListing>('tenants/' + encodeURIComponent(tenant) + '/administrators'),
   administratorCandidate: (tenant: string, username: string) => request<AdministratorCandidate>('tenants/' + encodeURIComponent(tenant) + '/administrators/candidate', { username }),
@@ -55,3 +63,10 @@ export type AdministratorCandidate = { username: string; displayName: string; id
 export type AdministratorChange = { requestId: string; tenantId: string; action: string; targetId: string | null; designationId: string; resultingStatus: string; createdAt: string }
 export type AdministratorListing = { administrators: TenantDesignation[]; canManage: boolean; validCount: number; history: AdministratorChange[] }
 export type AdministratorResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: AdministratorChange | null }
+
+export type BranchAction = 'create' | 'edit' | 'suspend' | 'reactivate' | 'close'
+export type ManagedBranch = { id: string; tenantId: string; code: string; name: string; status: string; createdAt: string; updatedAt: string }
+export type BranchChange = { requestId: string; tenantId: string; action: string; branch: ManagedBranch; previousCode: string | null; previousName: string | null; previousStatus: string | null; createdAt: string }
+export type BranchPage = { branches: ManagedBranch[]; hasMore: boolean; canManage: boolean }
+export type BranchDetail = { branch: ManagedBranch; canManage: boolean; codeEditable: boolean; history: BranchChange[] }
+export type BranchResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: BranchChange | null }
