@@ -38,6 +38,7 @@ public final class BranchReadCoordinator {
                 // Hold shared admission through COMMIT. Evaluate F04 and tenant state only after acquiring it.
                 try (var barrier = connection.createStatement()) {
                     barrier.setQueryTimeout(5);
+                    barrier.execute("SELECT pg_advisory_xact_lock_shared(370019,1)");
                     barrier.execute("SELECT pg_advisory_xact_lock_shared(410023,1)");
                 }
                 var decision = authorization.evaluate(username, password, selected);
