@@ -772,6 +772,8 @@ def main():
     branches_main('BranchAdministrationPostgresTest')
     from postgres_branch_configuration_contract import main as configuration_main
     configuration_main('BranchConfigurationPostgresTest')
+    from postgres_inactive_branch_contract import main as inactive_main
+    inactive_main('InactiveBranchPostgresTest')
     print('All isolated migration checks passed. Shared PostgreSQL was not contacted.', flush=True)
 
 

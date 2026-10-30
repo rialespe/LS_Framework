@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V26, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V27, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -51,7 +51,8 @@ def prepare_database(cluster):
             (['ls_core_tenant_lifecycle_dev', 'ls_core_tenant_lifecycle_log_dev'], 'prepare_tenant_lifecycle.sql', '23'),
             (['ls_core_tenant_admin_dev', 'ls_core_tenant_admin_log_dev'], 'prepare_tenant_administrators.sql', '24'),
             (['ls_core_branch_admin_dev', 'ls_core_branch_admin_log_dev'], 'prepare_branch_administration.sql', '25'),
-            (['ls_core_branch_config_dev', 'ls_core_branch_config_log_dev'], 'prepare_branch_configuration.sql', '26')]:
+            (['ls_core_branch_config_dev', 'ls_core_branch_config_log_dev'], 'prepare_branch_configuration.sql', '26'),
+            (['ls_core_branch_guard_dev', 'ls_core_branch_history_dev'], 'prepare_branch_operation_guards.sql', '27')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -59,7 +60,7 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='26').returncode == 0, 'Flyway validates V1-V26')
+    check(cluster.flyway('validate', location=SOURCE, target='27').returncode == 0, 'Flyway validates V1-V27')
 
 
 def core_smoke(opener, username, initial_username, second_username, password, cluster):
@@ -123,12 +124,18 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
             check(response.status == 201 and result['outcome'] == 'CONFIRMED', 'real branch creation ' + code)
             branches.append(result['change']['branch']['id'])
         check(get('branch-administration/operations/' + operation)['outcome'] == 'CONFIRMED', 'branch creation receipt persisted')
+    install_history_fixture(cluster, tenant_id)
+    check(check_branch_read(cluster, tenant_id, branches[1], username, password), 'ACTIVE bounded read permitted')
     for action, state in [('suspend', 'SUSPENDED'), ('reactivate', 'ACTIVE'), ('close', 'CLOSED')]:
         detail = get(branch_path + '/' + branches[1])
         operation = str(uuid.uuid4())
         with post(branch_path + '/' + branches[1] + '/' + action, {'requestId': operation, 'expectedUpdatedAt': detail['branch']['updatedAt'], 'password': password}) as response:
             check(json.load(response)['outcome'] == 'CONFIRMED', 'real branch transition ' + action)
         check(get(branch_path + '/' + branches[1])['branch']['status'] == state, 'persisted branch state ' + state)
+        if state != 'ACTIVE':
+            check(not check_branch_read(cluster, tenant_id, branches[1], username, password), 'inactive branch operational read denied')
+            check(get('branch-administration/tenants/' + tenant_id + '/historical-changes?branches=' + branches[1])['entries'], 'real permitted historical query')
+        check(check_branch_read(cluster, tenant_id, branches[0], username, password), 'other branch still operational')
     detail = get(branch_path + '/' + branches[1])
     check(len(detail['history']) == 4, 'persisted creation and transition history')
     check(get(branch_path + '/' + branches[0])['branch']['status'] == 'ACTIVE', 'matrix preserved while second branch closes')
@@ -160,6 +167,31 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
     check(cluster.query("SELECT count(*) FROM tenant.branch_configurations WHERE tenant_id<>'" + tenant_id + "'") == '0', 'no configuration was assigned to other tenants')
     with post('logout', {}) as response:
         check(response.status == 204, 'Core logout confirmed')
+
+
+def install_history_fixture(cluster, tenant_id):
+    import uuid
+    selected = str(uuid.UUID(tenant_id))
+    check(cluster.port not in (5432, 55432) and (cluster.root / 'data/PG_VERSION').read_text().strip() == '17', 'owned history fixture only')
+    result = cluster.psql(sql=(ROOT / 'scripts/pilot/branch_history_fixture.sql').read_text(encoding='utf-8').replace('__TENANT__', selected))
+    check(result.returncode == 0, 'explicit disposable historical grants; no business write grant')
+
+
+def check_branch_read(cluster, tenant_id, branch_id, username, password):
+    import uuid
+    tenant, branch = str(uuid.UUID(tenant_id)), str(uuid.UUID(branch_id))
+    app = cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core'")
+    env = environment()
+    env.update(LS_PILOT_ROOT=str(cluster.root), LS_PILOT_PORT=str(cluster.port), LS_PILOT_CORE_USERNAME=username)
+    for role in ('ls_core_branch_operation_dev', 'ls_core_operation_emitter_dev', 'ls_core_authorization_reader_dev', 'ls_core_password_authenticator_dev'):
+        env['LS_PILOT_' + role.upper()] = cluster.secrets[role]
+    java = Path(env['JAVA_HOME']) / 'bin/java.exe'
+    classpath = str(BACKEND / 'target/classes') + os.pathsep + (cluster.root / 'classpath.txt').read_text(encoding='utf-8').strip()
+    result = cluster.run([java, '--class-path', classpath, ROOT / 'scripts/pilot/PilotBranchRead.java', tenant, app, branch], input_text=password, env=env, timeout=30)
+    check(result.returncode == 0, 'bounded F04 branch-reader probe executed')
+    allowed = 'BRANCH_READ=ALLOWED' in result.stdout
+    print('Existing bounded operational reader: ' + ('ALLOWED' if allowed else 'DENIED'), flush=True)
+    return allowed
 
 
 def install_configuration_fixture(cluster, tenant_id):
@@ -241,7 +273,7 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true',
+                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
                 for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
                                      ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev'),
@@ -251,6 +283,7 @@ def main():
                                      ('LS_TENANT_ADMIN_LOG_DB_', 'ls_core_tenant_admin_log_dev'),
                                      ('LS_BRANCH_ADMIN_DB_', 'ls_core_branch_admin_dev'),
                                      ('LS_BRANCH_ADMIN_LOG_DB_', 'ls_core_branch_admin_log_dev'),
+                                     ('LS_BRANCH_HISTORY_DB_', 'ls_core_branch_history_dev'),
                                      ('LS_BRANCH_CONFIG_DB_', 'ls_core_branch_config_dev'),
                                      ('LS_BRANCH_CONFIG_LOG_DB_', 'ls_core_branch_config_log_dev')]:
                     env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev', prefix + 'PASSWORD': cluster.secrets[role]})
@@ -314,18 +347,29 @@ def main():
                 check(opener.open(request, timeout=10).status == 204, 'real logout through proxy')
             elif options.core:
                 print('Catalogo real sin contratos especializados. Para un ejemplo NO PRODUCTIVO, crea y activa una empresa en la UI.', flush=True)
-                print('Comando: fixture-config <UUID_EMPRESA> | salir. El fixture se instala solo en esa empresa del cluster desechable.', flush=True)
+                print('Comando: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir. El fixture se instala solo en esa empresa del cluster desechable.', flush=True)
                 while all(child.poll() is None for child in children):
                     command = input('Piloto Core> ').strip()
                     if command == 'salir':
                         break
-                    if command.startswith('fixture-config '):
+                    if command.startswith('fixture-history '):
+                        try:
+                            install_history_fixture(cluster, command.removeprefix('fixture-history ').strip())
+                        except (ValueError, AssertionError):
+                            print('History fixture unavailable or already installed.', flush=True)
+                    elif command.startswith('check-branch '):
+                        try:
+                            selected_tenant, selected_branch = command.removeprefix('check-branch ').split()
+                            check_branch_read(cluster, selected_tenant, selected_branch, core_username, password)
+                        except (ValueError, AssertionError):
+                            print('Branch probe unavailable. Use explicit tenant/branch UUIDs.', flush=True)
+                    elif command.startswith('fixture-config '):
                         try:
                             install_configuration_fixture(cluster, command.removeprefix('fixture-config ').strip())
                         except (ValueError, AssertionError):
                             print('Fixture no instalado. Usa una empresa activa creada por el OWNER de este piloto y no repitas una instalacion existente.', flush=True)
                     else:
-                        print('Comandos disponibles: fixture-config <UUID_EMPRESA> | salir', flush=True)
+                        print('Comandos disponibles: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir', flush=True)
             else:
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)

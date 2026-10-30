@@ -151,6 +151,7 @@ public final class JdbcApplicationSessions {
             if (application != LoginApplication.CORE) {
                 try (var barrier = connection.createStatement()) {
                     barrier.setQueryTimeout(5);
+                    barrier.execute("SELECT pg_advisory_lock_shared(370019,1)");
                     barrier.execute("SELECT pg_advisory_lock_shared(410023,1)");
                 }
             }
