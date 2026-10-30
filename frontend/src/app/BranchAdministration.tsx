@@ -14,7 +14,7 @@ const notices: Record<string, string> = {
   UNAVAILABLE: 'Servicio no disponible. El servidor no confirmó la operación. Revalida la información antes de intentar otro cambio.',
 }
 const pendingKey = 'ls.core.pending-branch'
-const otherPending = () => ['ls.core.pending-configuration', 'ls.core.pending-administrator', 'ls.core.pending-lifecycle', 'ls.core.pending-registration'].some(key => sessionStorage.getItem(key))
+const otherPending = () => ['ls.core.pending-user', 'ls.core.pending-configuration', 'ls.core.pending-administrator', 'ls.core.pending-lifecycle', 'ls.core.pending-registration'].some(key => sessionStorage.getItem(key))
 
 export function BranchAdministration() {
   const [companies, setCompanies] = useState<{ id: string; name: string; status: string }[]>([])

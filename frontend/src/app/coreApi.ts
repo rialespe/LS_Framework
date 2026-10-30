@@ -18,14 +18,20 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   return result as T
 }
 export const coreApi = {
+  exchangeTemporary: (username: string, temporaryPassword: string, newPassword: string) => request('tenant-users/exchange', { username, temporaryPassword, newPassword }),
+  tenantUserTenants: () => request<{ id: string; name: string; status: string }[]>('tenant-users/tenants'),
+  tenantUsers: (tenant: string, page = 0) => request<TenantUserPage>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users?page=' + page),
+  tenantUser: (tenant: string, id: string) => request<TenantUserDetail>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users/' + encodeURIComponent(id)),
+  tenantUserOperation: (id: string) => request<TenantUserResult>('tenant-users/operations/' + encodeURIComponent(id)),
+  tenantUserMutation: (tenant: string, action: 'create' | 'activate' | 'reissue', id: string | null, requestId: string, input: { username: string; displayName: string; email: string | null }, password: string) => request<TenantUserResult>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users' + (action === 'create' ? '' : '/' + encodeURIComponent(id!) + '/' + action), { requestId, ...(action === 'create' ? input : {}), password }, true),
   async login(username: string, password: string) { await request('login', { username, password }); await request('csrf') },
-  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean }> {
+  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean; usersOnly?: boolean }> {
     await request('session')
     try { return await request<{ kind: string; canRegister: boolean }>('authority') }
     catch (error) {
       if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error }
       try { const authority = await request<TenantAuthority>('tenant-authority'); return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead } }
-      catch (access) { if (!(access instanceof CoreFailure && [403, 404].includes(access.status))) { throw access }; try { await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } } catch (scope) { if (!(scope instanceof CoreFailure && [403, 404].includes(scope.status))) { throw scope }; await request('branch-administration/tenants'); return { kind: 'Administración de sucursales autorizada', canRegister: false, canAdmin: true, branchesOnly: true } } }
+      catch (access) { if (!(access instanceof CoreFailure && [403, 404].includes(access.status))) { throw access }; try { await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } } catch (scope) { if (!(scope instanceof CoreFailure && [403, 404].includes(scope.status))) { throw scope }; try { await request('tenant-users/tenants'); return { kind: 'Administración de usuarios autorizada', canRegister: false, canAdmin: true, usersOnly: true } } catch (users) { if (!(users instanceof CoreFailure && [403, 404].includes(users.status))) { throw users } }; await request('branch-administration/tenants'); return { kind: 'Administración de sucursales autorizada', canRegister: false, canAdmin: true, branchesOnly: true } } }
     }
   },
   configurationModules: (tenant: string, branch: string) => request<ConfigurationModule[]>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches/' + encodeURIComponent(branch) + '/module-configurations'),
@@ -85,3 +91,9 @@ export type ConfigurationDetail = { module: ConfigurationModule; configuration: 
 export type ConfigurationAction = 'prepare' | 'update' | 'validate'
 export type ConfigurationResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'MODULE_UNAVAILABLE' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; reason: string | null; change: ConfigurationChange | null; missingFields: string[] }
 function configurationPath(scope: ConfigurationScope) { return 'branch-administration/tenants/' + encodeURIComponent(scope.tenantId) + '/branches/' + encodeURIComponent(scope.branchId) + '/module-configurations/' + encodeURIComponent(scope.applicationId) + '/' + encodeURIComponent(scope.moduleId) + '/' + scope.version }
+
+export type TenantUser = { id: string; userId: string; username: string; displayName: string; email: string | null; emailVerified: boolean; identityStatus: string; membershipStatus: string; createdAt: string; createdBy: string | null; mustChangePassword: boolean; passwordExpiresAt: string | null; f04Ready: boolean; managedIncorporation: boolean }
+export type TenantUserChange = { requestId: string; tenantId: string; action: string; userId: string; membershipId: string; resultingStatus: string; temporaryExpiresAt: string | null; createdAt: string; actorId: string }
+export type TenantUserPage = { users: TenantUser[]; hasMore: boolean; canManage: boolean }
+export type TenantUserDetail = { user: TenantUser; canManage: boolean; history: TenantUserChange[] }
+export type TenantUserResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INVALID' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; change: TenantUserChange | null; temporaryPassword: string | null }

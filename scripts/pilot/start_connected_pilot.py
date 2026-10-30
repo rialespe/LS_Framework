@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V27, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V28, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -52,7 +52,8 @@ def prepare_database(cluster):
             (['ls_core_tenant_admin_dev', 'ls_core_tenant_admin_log_dev'], 'prepare_tenant_administrators.sql', '24'),
             (['ls_core_branch_admin_dev', 'ls_core_branch_admin_log_dev'], 'prepare_branch_administration.sql', '25'),
             (['ls_core_branch_config_dev', 'ls_core_branch_config_log_dev'], 'prepare_branch_configuration.sql', '26'),
-            (['ls_core_branch_guard_dev', 'ls_core_branch_history_dev'], 'prepare_branch_operation_guards.sql', '27')]:
+            (['ls_core_branch_guard_dev', 'ls_core_branch_history_dev'], 'prepare_branch_operation_guards.sql', '27'),
+            (['ls_core_tenant_users_dev', 'ls_core_tenant_users_log_dev'], 'prepare_tenant_users.sql', '28')]:
         reply = ''
         for role in roles:
             cluster.secrets[role] = secrets.token_urlsafe(32)
@@ -60,7 +61,7 @@ def prepare_database(cluster):
         check(cluster.psql(script=ROOT / 'scripts/migrations' / script, apply=True, reply=reply).returncode == 0,
               'owned role provisioning before V' + target)
         check(cluster.flyway('migrate', location=SOURCE, target=target).returncode == 0, 'owned migration through V' + target)
-    check(cluster.flyway('validate', location=SOURCE, target='27').returncode == 0, 'Flyway validates V1-V27')
+    check(cluster.flyway('validate', location=SOURCE, target='28').returncode == 0, 'Flyway validates V1-V28')
 
 
 def core_smoke(opener, username, initial_username, second_username, password, cluster):
@@ -115,6 +116,31 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
         check(rejected.code == 409, 'last administrator rejected by PostgreSQL through HTTPS')
         rejected.close()
     check(cluster.query("SELECT count(*) FROM tenant.valid_administrators('" + tenant_id + "')") == '1', 'PG17 confirms one valid administrator after rejected revocation')
+    user_path = 'tenant-users/tenants/' + tenant_id + '/users'
+    check(any(t['id'] == tenant_id for t in get('tenant-users/tenants')), 'authorized user administration selector')
+    new_username = 'pilot-new-' + secrets.token_hex(4)
+    operation = str(uuid.uuid4())
+    with post(user_path, {'requestId': operation, 'username': new_username, 'displayName': 'Nuevo usuario del piloto', 'password': password}) as response:
+        user_result = json.load(response)
+        check(response.status == 201 and user_result['outcome'] == 'CONFIRMED', 'atomic new user incorporation and one-time delivery')
+    member_id = user_result['change']['membershipId']
+    temporary = user_result.pop('temporaryPassword')
+    check(get('tenant-users/operations/' + operation)['temporaryPassword'] is None, 'reconciliation never returns temporary secret')
+    check(get(user_path + '/' + member_id)['user']['membershipStatus'] == 'PENDING', 'new membership pending before F04')
+    with post('tenant-users/exchange', {'username': new_username, 'temporaryPassword': temporary, 'newPassword': password}) as response:
+        check(response.status == 204, 'real F04 exchange through HTTPS')
+    temporary = None
+    check(get(user_path + '/' + member_id)['user']['identityStatus'] == 'ACTIVE', 'identity active after F04')
+    with post(user_path + '/' + member_id + '/activate', {'requestId': str(uuid.uuid4()), 'password': password}) as response:
+        check(json.load(response)['outcome'] == 'CONFIRMED', 'explicit membership activation after F04')
+    check(get(user_path + '/' + member_id)['user']['membershipStatus'] == 'ACTIVE', 'membership persisted ACTIVE')
+    check(cluster.query("SELECT count(*) FROM tenant.branch_memberships WHERE membership_id='" + member_id + "'") == '0', 'no automatic branch permissions')
+    try:
+        post(user_path, {'requestId': str(uuid.uuid4()), 'username': new_username, 'displayName': 'Duplicado', 'password': password})
+        raise RuntimeError('Duplicate must be rejected')
+    except urllib.error.HTTPError as rejected:
+        check(rejected.code == 409, 'global username duplicate neutrally rejected')
+        rejected.close()
     branch_path = 'branch-administration/tenants/' + tenant_id + '/branches'
     branches = []
     for code in ('CASA MATRIZ', 'SUCURSAL 02'):
@@ -273,9 +299,13 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
+                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
-                for prefix, role in [('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
+                for prefix, role in [('LS_TENANT_USERS_DB_', 'ls_core_tenant_users_dev'),
+                                     ('LS_TENANT_USERS_LOG_DB_', 'ls_core_tenant_users_log_dev'),
+                                     ('LS_PASSWORD_ISSUER_DB_', 'ls_core_password_issuer_dev'),
+                                     ('LS_PASSWORD_CHANGER_DB_', 'ls_core_password_changer_dev'),
+                                     ('LS_TENANT_REGISTRATION_DB_', 'ls_core_tenant_registrar_dev'),
                                      ('LS_TENANT_REGISTRATION_LOG_DB_', 'ls_core_tenant_registration_log_dev'),
                                      ('LS_TENANT_LIFECYCLE_DB_', 'ls_core_tenant_lifecycle_dev'),
                                      ('LS_TENANT_LIFECYCLE_LOG_DB_', 'ls_core_tenant_lifecycle_log_dev'),

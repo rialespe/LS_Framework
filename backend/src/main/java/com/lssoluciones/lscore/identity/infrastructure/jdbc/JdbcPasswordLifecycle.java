@@ -2,7 +2,6 @@ package com.lssoluciones.lscore.identity.infrastructure.jdbc;
 
 import com.lssoluciones.lscore.identity.application.PasswordCredentialVerifier;
 import java.nio.CharBuffer;
-import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -22,11 +21,9 @@ public final class JdbcPasswordLifecycle {
     public static final String ISSUER_ROLE = "ls_core_password_issuer_dev";
     public static final String CHANGER_ROLE = "ls_core_password_changer_dev";
     private static final String PREFIX = PasswordCredentialVerifier.HASH_PREFIX;
-    private static final char[] ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".toCharArray();
     private final DataSource issuer;
     private final DataSource changer;
     private final Duration temporaryValidity;
-    private final SecureRandom random = new SecureRandom();
     private final Pbkdf2PasswordEncoder encoder = PasswordCredentialVerifier.newEncoder();
 
     public JdbcPasswordLifecycle(DataSource issuer, DataSource changer, Duration temporaryValidity) {
@@ -41,25 +38,21 @@ public final class JdbcPasswordLifecycle {
 
     /** Returns a closeable, one-read secret only after commit. Never use in a public response or logging. */
     public TemporaryPassword issue(UUID userId) {
-        char[] secret = new char[32]; // 32 independent uniform symbols: 192 bits of entropy.
-        for (int i = 0; i < secret.length; i++) {
-            secret[i] = ALPHABET[random.nextInt(ALPHABET.length)];
-        }
-        try {
-            persistTemporary(userId, secret);
-            return new TemporaryPassword(secret);
+        try (var material = new TemporaryCredential()) {
+            char[] secret = material.take();
+            try {
+                persistTemporary(userId, material.hash());
+                return new TemporaryPassword(secret);
+            } finally { Arrays.fill(secret, '\0'); }
         } catch (SQLException | RuntimeException failure) {
             throw new PasswordChangeRejectedException();
-        } finally {
-            Arrays.fill(secret, '\0');
         }
     }
 
-    private void persistTemporary(UUID userId, char[] secret) throws SQLException {
+    private void persistTemporary(UUID userId, String hash) throws SQLException {
         try (var connection = issuer.getConnection()) {
             begin(connection, ISSUER_ROLE);
             try {
-                String hash = PREFIX + encoder.encode(CharBuffer.wrap(secret));
                 try (var statement = connection.prepareStatement("INSERT INTO identity.user_credentials "
                         + "(user_id,password_hash,must_change_password,password_changed_at,password_expires_at,"
                         + "failed_attempts,locked_until) SELECT id,?,true,clock_timestamp(),"

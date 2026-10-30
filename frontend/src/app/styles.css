@@ -364,3 +364,10 @@ footer { margin-top: 36px; padding: 22px 0 26px; border-top: 1px solid var(--bor
 .module-configuration-card { padding: 1rem; border: 1px solid #dbe3ee; border-radius: .75rem; margin: 1rem 0; background: #f7fafc; overflow-wrap: anywhere; }
 .configuration-field { display: grid; gap: .5rem; }
 .configuration-field select { padding: .75rem; border: 1px solid #a8b6c9; border-radius: .5rem; background: white; color: #162d48; width: 100%; }
+
+.temporary-password { display: block; padding: 1rem; margin: 1rem 0; font-family: monospace; font-size: 1.15rem; overflow-wrap: anywhere; user-select: all; background: #fff; border: 1px solid #b5c6db; border-radius: .5rem; }
+
+.tenant-users-workspace > label, .tenant-exchange > label { display: block; margin: 20px 0 8px; font-weight: 600; }
+.tenant-users-workspace > select, .tenant-exchange > input { display: block; width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); box-sizing: border-box; }
+.tenant-exchange { border: 1px solid var(--border); border-radius: 12px; margin-top: 24px; max-width: 640px; }
+.tenant-exchange > .button { margin-top: 22px; }
