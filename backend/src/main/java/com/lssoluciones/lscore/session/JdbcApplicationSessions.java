@@ -203,6 +203,7 @@ public final class JdbcApplicationSessions {
                 throw failure;
             }
         } catch (JdbcSessionContexts.Denied | JdbcTenantRegistration.Denied | JdbcTenantLifecycle.Denied | JdbcTenantLifecycle.Unavailable
+                | JdbcTenantUsers.Denied | JdbcTenantUsers.Missing | JdbcTenantUsers.Unavailable | JdbcTenantUsers.Invalid
                 | JdbcTenantAdministrators.Denied | JdbcTenantAdministrators.Missing | JdbcTenantAdministrators.Unavailable
                 | JdbcBranchAdministration.Denied | JdbcBranchAdministration.Missing | JdbcBranchAdministration.Unavailable
                 | JdbcBranchConfiguration.Denied | JdbcBranchConfiguration.Missing | JdbcBranchConfiguration.Unavailable failure) {

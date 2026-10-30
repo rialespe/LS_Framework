@@ -51,7 +51,7 @@ export function BranchModuleConfiguration({ tenantId, branchId, branchStatus }: 
     const inputs = new FormData(form)
     const password = String(inputs.get('password') ?? ''); (form.elements.namedItem('password') as HTMLInputElement).value = ''
     if (!detail || !password || working.current || busy || pending) { return }
-    if (['ls.core.pending-registration', 'ls.core.pending-lifecycle', 'ls.core.pending-administrator', 'ls.core.pending-branch'].some(key => sessionStorage.getItem(key))) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); return }
+    if (['ls.core.pending-user', 'ls.core.pending-registration', 'ls.core.pending-lifecycle', 'ls.core.pending-administrator', 'ls.core.pending-branch'].some(key => sessionStorage.getItem(key))) { setMessage('Hay otra operación crítica sin reconciliar. Consulta su referencia antes de continuar.'); return }
     const values: ConfigurationValues = {}
     if (!validate) {
       for (const field of detail.module.fields) {
