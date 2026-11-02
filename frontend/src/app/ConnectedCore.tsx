@@ -1,3 +1,4 @@
+import { OwnContextPermissions, AssignmentReceipt } from './ProfileAssignments'
 import { TenantRbac, RbacReceipt } from './TenantRbac'
 import { TenantAccessReceipt } from './TenantAccess'
 import { IdentityLinks } from './IdentityLinks'
@@ -104,10 +105,12 @@ export function ConnectedCore() {
       {(phase === 'login' || phase === 'denied') && <TenantUserReceipt />}
       {phase !== 'checking' && <TenantAccessReceipt />}
       {phase === 'login' && <TemporaryPasswordExchange />}
+      {(phase === 'workspace' || phase === 'personal') && <OwnContextPermissions />}
       {(phase === 'workspace' || phase === 'personal' || phase === 'denied') && <IdentityLinks />}
       {phase === 'workspace' && section === 'users' && <TenantUsersWorkspace />}
       {phase === 'workspace' && section === 'rbac' && <TenantRbac />}
       {phase !== 'checking' && <RbacReceipt />}
+      {phase !== 'checking' && <AssignmentReceipt />}
       {phase === 'workspace' && section === 'branches' && <BranchAdministration />}
       {phase === 'workspace' && section === 'administrators' && <TenantAdministratorsWorkspace />}
       {phase === 'workspace' && section === 'admin' && <TenantAdministration />}

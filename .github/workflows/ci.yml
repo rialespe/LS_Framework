@@ -100,3 +100,7 @@ jobs:
         env:
           LS_PG_BIN: /usr/lib/postgresql/17/bin
         run: python3 scripts/tests/postgres_tenant_rbac_contract.py
+      - name: LFD-50 contextual assignments and V30/V31/F05 regressions on V32
+        env:
+          LS_PG_BIN: /usr/lib/postgresql/17/bin
+        run: python3 scripts/tests/postgres_profile_assignments_contract.py

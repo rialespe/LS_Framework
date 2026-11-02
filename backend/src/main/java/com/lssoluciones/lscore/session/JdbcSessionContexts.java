@@ -40,14 +40,14 @@ public final class JdbcSessionContexts {
 
     public record Tenant(UUID id, String name) { }
     public record Branch(UUID id, String code, String name) { }
-    public record Permission(UUID id, String code, String name, String resourceScope, UUID moduleId) { }
+    public record Permission(UUID id, String code, String name, String resourceScope, UUID moduleId, String operationKind) { }
     public record Module(UUID id, String code, String name, List<Permission> permissions) { }
     public record Context(UUID id, UUID tenantId, UUID applicationId, UUID branchId,
             List<Permission> permissions, List<Module> modules) { }
     private record Access(Tenant tenant, Branch branch, UUID membership, UUID branchMembership) { }
 
     public List<Tenant> tenants(LoginApplication application, String token) {
-        return sessions.withSession(application, token, (connection, session) -> {
+        return sessions.withContextSession(application, token, (connection, session) -> {
             var result = new LinkedHashMap<UUID, Tenant>();
             for (var access : access(connection, session, null, null)) {
                 result.put(access.tenant().id(), access.tenant());
@@ -57,7 +57,7 @@ public final class JdbcSessionContexts {
     }
 
     public List<Branch> branches(LoginApplication application, String token, UUID tenant) {
-        return sessions.withSession(application, token, (connection, session) -> {
+        return sessions.withContextSession(application, token, (connection, session) -> {
             var available = access(connection, session, tenant, null);
             require(!available.isEmpty());
             return available.stream().map(Access::branch).toList();
@@ -65,7 +65,7 @@ public final class JdbcSessionContexts {
     }
 
     public Context select(LoginApplication application, String token, UUID tenant, UUID branch) {
-        return sessions.withSession(application, token, (connection, session) -> {
+        return sessions.withContextSession(application, token, (connection, session) -> {
             require(tenant != null && branch != null);
             var available = access(connection, session, tenant, branch);
             require(available.size() == 1);
@@ -96,7 +96,7 @@ public final class JdbcSessionContexts {
     }
 
     public Context current(LoginApplication application, String token) {
-        return sessions.withSession(application, token, (connection, session) -> {
+        return sessions.withContextSession(application, token, (connection, session) -> {
             try (var statement = connection.prepareStatement("SELECT id,tenant_id,branch_id,membership_id,"
                     + "expires_at>clock_timestamp(),expires_at FROM security.session_contexts "
                     + "WHERE session_id=? AND user_id=? AND application_id=? AND revoked_at IS NULL")) {
@@ -143,7 +143,7 @@ public final class JdbcSessionContexts {
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
                     if (TenantContextPolicy.eligible(rows.getString(8), rows.getString(9), rows.getString(10),
-                            rows.getString(11), rows.getString(12), rows.getString(13), rows.getString(14))) {
+                            rows.getString(11), rows.getString(12), rows.getString(13), contextual(connection) && "READ_ONLY".equals(rows.getString(14)) ? "ACTIVE" : rows.getString(14))) {
                         result.add(new Access(new Tenant(rows.getObject(1, UUID.class), rows.getString(2)),
                                 new Branch(rows.getObject(3, UUID.class), rows.getString(4), rows.getString(5)),
                                 rows.getObject(6, UUID.class), rows.getObject(7, UUID.class)));
@@ -160,15 +160,28 @@ public final class JdbcSessionContexts {
         validateRelationships(session, id, scope, access, expiry);
         var permissions = new ArrayList<Permission>();
         var modules = new LinkedHashMap<UUID, Module>();
-        try (var statement = connection.prepareStatement(PERMISSIONS)) {
-            statement.setObject(1, scope.tenantId());
-            statement.setObject(2, scope.applicationId());
-            statement.setObject(3, access.branchMembership());
+        boolean contextual = contextual(connection);
+        String sql = contextual ? "SELECT * FROM security.resolve_context_permissions(?,?,?,?,?,?,?,?)" : PERMISSIONS;
+        try (var statement = connection.prepareStatement(sql)) {
+            if (contextual) {
+                statement.setObject(1, session.userId());
+                statement.setObject(2, scope.tenantId());
+                statement.setObject(3, scope.applicationId());
+                statement.setObject(4, scope.branchId());
+                statement.setObject(5, access.membership());
+                statement.setObject(6, access.branchMembership());
+                statement.setObject(7, id);
+                statement.setObject(8, session.id());
+            } else {
+                statement.setObject(1, scope.tenantId());
+                statement.setObject(2, scope.applicationId());
+                statement.setObject(3, access.branchMembership());
+            }
             statement.setQueryTimeout(5);
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
                     var permission = new Permission(rows.getObject(1, UUID.class), rows.getString(2), rows.getString(3),
-                            rows.getString(4), rows.getObject(5, UUID.class));
+                            rows.getString(4), rows.getObject(5, UUID.class), contextual ? rows.getString(8) : null);
                     permissions.add(permission);
                     if (permission.moduleId() != null) {
                         var module = modules.get(permission.moduleId());
@@ -211,6 +224,13 @@ public final class JdbcSessionContexts {
             }
         };
         new ContextResolver(source, Clock.systemUTC()).session(identity, id, scope);
+    }
+
+    private static boolean contextual(Connection connection) throws SQLException {
+        try (var query = connection.createStatement(); var rows = query.executeQuery(
+                "SELECT to_regprocedure('security.resolve_context_permissions(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid)') IS NOT NULL")) {
+            return rows.next() && rows.getBoolean(1);
+        }
     }
 
     private static void require(boolean allowed) {
