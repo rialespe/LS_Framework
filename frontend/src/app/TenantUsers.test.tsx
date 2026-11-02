@@ -21,6 +21,7 @@ it('delivers only after confirmation, clears the view, keeps secrets out of stor
   const secret = 'one-time-secret-46'
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     expect(init.credentials).toBe('same-origin'); expect(init.cache).toBe('no-store')
+    if (url.includes('/identity-links/')) { return json({ requests: [], hasMore: false }) }
     if (url.endsWith('/csrf')) { return json({ csrfToken: 'fresh-csrf' }) }
     if (init.method === 'POST') {
       const body = JSON.parse(String(init.body)); expect(body.password).toBe('Fresh-admin-46!'); expect(body.actorId).toBeUndefined()
@@ -59,6 +60,7 @@ it('delivers only after confirmation, clears the view, keeps secrets out of stor
 it('blocks an uncertain command, reconciles without a secret, and rejects existing identity creation neutrally', async () => {
   let reference = ''; let posts = 0; let conflict = false
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.includes('/identity-links/')) { return json({ requests: [], hasMore: false }) }
     if (url.endsWith('/csrf')) { return json({ csrfToken: 'csrf' }) }
     if (url.includes('/operations/')) { return json(confirmed(reference, null)) }
     if (init.method === 'POST') { posts++; reference = JSON.parse(String(init.body)).requestId; return json({ outcome: conflict ? 'CONFLICT' : 'UNKNOWN', correlation: reference, change: null, temporaryPassword: null }, conflict ? 409 : 202) }
@@ -82,6 +84,7 @@ it('blocks an uncertain command, reconciles without a secret, and rejects existi
 it('does not revive a one-time delivery after unmount or a late response', async () => {
   let release: (() => void) | undefined; let reference = ''
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.includes('/identity-links/')) { return json({ requests: [], hasMore: false }) }
     if (url.endsWith('/csrf')) { return json({ csrfToken: 'csrf' }) }
     if (init.method === 'POST') { reference = JSON.parse(String(init.body)).requestId; await new Promise<void>(resolve => { release = resolve }); return json(confirmed(reference, 'late-secret')) }
     return json({ users: [], canManage: true, hasMore: false })
@@ -97,6 +100,7 @@ it('does not revive a one-time delivery after unmount or a late response', async
 
 it('exchanges the temporary credential with CSRF and clears the form', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.includes('/identity-links/')) { return json({ requests: [], hasMore: false }) }
     if (url.endsWith('/csrf')) { return json({ csrfToken: 'csrf' }) }
     expect(url).toBe('/api/auth/core/tenant-users/exchange')
     expect(JSON.parse(String(init.body))).toEqual({ username: 'nuevo', temporaryPassword: 'temporal', newPassword: 'Definitiva-46!' })
@@ -115,6 +119,7 @@ it('discards a late secret when the page was hidden during the command', async (
   let release: (() => void) | undefined; let reference = ''
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.includes('/identity-links/')) { return json({ requests: [], hasMore: false }) }
     if (url.endsWith('/csrf')) { return json({ csrfToken: 'csrf' }) }
     if (init.method === 'POST') { reference = JSON.parse(String(init.body)).requestId; await new Promise<void>(resolve => { release = resolve }); return json(confirmed(reference, 'hidden-page-secret')) }
     if (url.endsWith('/' + member.id)) { return json({ user: member, canManage: true, history: [] }) }

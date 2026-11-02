@@ -1,3 +1,4 @@
+import { IdentityLinks } from './IdentityLinks'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TenantUsersWorkspace, TemporaryPasswordExchange, TenantUserReceipt } from './TenantUsers'
 import { BranchAdministration } from './BranchAdministration'
@@ -9,7 +10,7 @@ import type { Administrator, RegisteredTenant, RegistrationResult } from './core
 
 /** Real administrative form. Application state never grants platform authority. */
 export function ConnectedCore() {
-  const [phase, setPhase] = useState<'checking' | 'login' | 'workspace' | 'denied'>('checking')
+  const [phase, setPhase] = useState<'checking' | 'login' | 'workspace' | 'personal' | 'denied'>('checking')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [administrator, setAdministrator] = useState<Administrator | null>(null)
@@ -35,7 +36,7 @@ export function ConnectedCore() {
     working.current = true
     const current = ++generation.current
     clear(); setPhase('checking')
-    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setCanRegister(result.canRegister); if (!result.canRegister && result.canAdmin) { setSection(result.usersOnly ? 'users' : result.branchesOnly ? 'branches' : result.tenantOnly ? 'administrators' : 'admin') }; setPhase(result.canRegister || result.canAdmin ? 'workspace' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
+    try { const result = await coreApi.authority(); if (current === generation.current) { setKind(result.kind); setCanRegister(result.canRegister); if (!result.canRegister && result.canAdmin) { setSection(result.usersOnly ? 'users' : result.branchesOnly ? 'branches' : result.tenantOnly ? 'administrators' : 'admin') }; setPhase(result.canRegister || result.canAdmin ? 'workspace' : result.personal ? 'personal' : 'denied'); if (result.canRegister && requestId.current) { try { const saved = await coreApi.find(requestId.current); if (current === generation.current && saved.outcome === 'CONFIRMED' && saved.tenant) { setTenant(saved.tenant); setUncertain(false); sessionStorage.removeItem('ls.core.pending-registration') } } catch (error) { if (!(error instanceof CoreFailure && error.status === 404)) { throw error } } } } }
     catch (error) { if (current === generation.current) { failure(error) } }
     finally { working.current = false }
   }, [clear, failure])
@@ -54,7 +55,7 @@ export function ConnectedCore() {
   }
   const login = (form: HTMLFormElement) => {
     const values = new FormData(form); const username = String(values.get('username')); const password = String(values.get('password')); form.reset()
-    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setCanRegister(authority.canRegister); if (!authority.canRegister && authority.canAdmin) { setSection(authority.usersOnly ? 'users' : authority.branchesOnly ? 'branches' : authority.tenantOnly ? 'administrators' : 'admin') }; setPhase(authority.canRegister || authority.canAdmin ? 'workspace' : 'denied') }
+    void run(async () => { try { await coreApi.login(username, password); const authority = await coreApi.authority(); setKind(authority.kind); setCanRegister(authority.canRegister); if (!authority.canRegister && authority.canAdmin) { setSection(authority.usersOnly ? 'users' : authority.branchesOnly ? 'branches' : authority.tenantOnly ? 'administrators' : 'admin') }; setPhase(authority.canRegister || authority.canAdmin ? 'workspace' : authority.personal ? 'personal' : 'denied') }
       catch { clear(); setPhase('login'); setMessage('Acceso no disponible. Revisa tus datos y tu autorización.') } })
   }
   const lookup = (form: HTMLFormElement) => {
@@ -92,7 +93,7 @@ export function ConnectedCore() {
     <nav className={menu ? 'navigation open' : 'navigation'} aria-label="Administración LS Core">{phase === 'workspace' && <><button aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}>Empresas → Administración de empresas</button><button aria-current={section === 'administrators' ? 'page' : undefined} onClick={() => setSection('administrators')}>Empresas / Administradores</button><button aria-current={section === 'users' ? 'page' : undefined} onClick={() => setSection('users')}>Empresas → Usuarios</button><button aria-current={section === 'branches' ? 'page' : undefined} onClick={() => setSection('branches')}>Empresas / Sucursales</button>{canRegister && <button aria-current={section === 'new' ? 'page' : undefined} onClick={() => setSection('new')}>Empresas / Nueva empresa</button>}</>}</nav>
     <div className="workspace"><span>LS Core<small>Administración autenticada</small></span></div></header>
     <main className="main core-main"><div className="page-heading"><div><p className="eyebrow">LS SOLUCIONES / EMPRESAS</p><h1>{section === 'new' ? 'Nueva empresa' : 'Empresas'}</h1><p>LS Core → Administración segura de empresas.</p></div>
-      {phase === 'workspace' && <div className="pilot-actions"><span>{kind}</span><button className="button" disabled={busy} onClick={() => { void refresh() }}>Revalidar acceso</button><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button></div>}</div>
+      {(phase === 'workspace' || phase === 'personal') && <div className="pilot-actions"><span>{kind}</span><button className="button" disabled={busy} onClick={() => { void refresh() }}>Revalidar acceso</button><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button></div>}</div>
       {message && <p role="status" className="pilot-message">{message}</p>}{(busy || phase === 'checking') && <p role="status">Consultando el servidor…</p>}
       {phase === 'login' && <form className="access-panel" onSubmit={e => { e.preventDefault(); login(e.currentTarget) }}><h2>Acceso independiente a LS Core</h2>
         <div className="access-field"><label htmlFor="core-user">Usuario</label><input id="core-user" name="username" autoComplete="username" required disabled={busy} /></div>
@@ -100,6 +101,7 @@ export function ConnectedCore() {
       {phase === 'denied' && <section className="preview-panel"><p>Se requiere autoridad global o empresarial expresamente habilitada.</p><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button><button className="button" onClick={() => { void refresh() }}>Comprobar acceso</button></section>}
       {(phase === 'login' || phase === 'denied') && <TenantUserReceipt />}
       {phase === 'login' && <TemporaryPasswordExchange />}
+      {(phase === 'workspace' || phase === 'personal' || phase === 'denied') && <IdentityLinks />}
       {phase === 'workspace' && section === 'users' && <TenantUsersWorkspace />}
       {phase === 'workspace' && section === 'branches' && <BranchAdministration />}
       {phase === 'workspace' && section === 'administrators' && <TenantAdministratorsWorkspace />}

@@ -18,6 +18,11 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   return result as T
 }
 export const coreApi = {
+  identityLinksReceived: (page = 0) => request<{ requests: IdentityLink[]; hasMore: boolean }>('identity-links/received?page=' + page),
+  identityLinksSent: (tenant: string, page = 0) => request<{ requests: IdentityLinkReceipt[]; hasMore: boolean }>('identity-links/tenants/' + encodeURIComponent(tenant) + '/sent?page=' + page),
+  identityLinkRequest: (tenant: string, requestId: string, username: string, password: string) => request<IdentityLinkResult>('identity-links/tenants/' + encodeURIComponent(tenant) + '/requests', { requestId, username, password }, true),
+  identityLinkDecision: (id: string, action: 'accept' | 'reject', requestId: string, password: string) => request<IdentityLinkResult>('identity-links/received/' + encodeURIComponent(id) + '/' + action, { requestId, password }, true),
+  identityLinkOperation: (id: string) => request<IdentityLinkResult>('identity-links/operations/' + encodeURIComponent(id)),
   exchangeTemporary: (username: string, temporaryPassword: string, newPassword: string) => request('tenant-users/exchange', { username, temporaryPassword, newPassword }),
   tenantUserTenants: () => request<{ id: string; name: string; status: string }[]>('tenant-users/tenants'),
   tenantUsers: (tenant: string, page = 0) => request<TenantUserPage>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users?page=' + page),
@@ -25,14 +30,22 @@ export const coreApi = {
   tenantUserOperation: (id: string) => request<TenantUserResult>('tenant-users/operations/' + encodeURIComponent(id)),
   tenantUserMutation: (tenant: string, action: 'create' | 'activate' | 'reissue', id: string | null, requestId: string, input: { username: string; displayName: string; email: string | null }, password: string) => request<TenantUserResult>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users' + (action === 'create' ? '' : '/' + encodeURIComponent(id!) + '/' + action), { requestId, ...(action === 'create' ? input : {}), password }, true),
   async login(username: string, password: string) { await request('login', { username, password }); await request('csrf') },
-  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean; usersOnly?: boolean }> {
+  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean; usersOnly?: boolean; personal?: boolean }> {
     await request('session')
     try { return await request<{ kind: string; canRegister: boolean }>('authority') }
-    catch (error) {
-      if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error }
-      try { const authority = await request<TenantAuthority>('tenant-authority'); return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead } }
-      catch (access) { if (!(access instanceof CoreFailure && [403, 404].includes(access.status))) { throw access }; try { await request('administrator-tenants'); return { kind: 'Administración empresarial autorizada', canRegister: false, canAdmin: true, tenantOnly: true } } catch (scope) { if (!(scope instanceof CoreFailure && [403, 404].includes(scope.status))) { throw scope }; try { await request('tenant-users/tenants'); return { kind: 'Administración de usuarios autorizada', canRegister: false, canAdmin: true, usersOnly: true } } catch (users) { if (!(users instanceof CoreFailure && [403, 404].includes(users.status))) { throw users } }; await request('branch-administration/tenants'); return { kind: 'Administración de sucursales autorizada', canRegister: false, canAdmin: true, branchesOnly: true } } }
+    catch (error) { if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error } }
+    try { const authority = await request<TenantAuthority>('tenant-authority'); return { kind: authority.kind, canRegister: false, canAdmin: authority.canRead } }
+    catch (error) { if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error } }
+    for (const scope of [
+      { path: 'administrator-tenants', kind: 'Administración empresarial autorizada', tenantOnly: true },
+      { path: 'tenant-users/tenants', kind: 'Administración de usuarios autorizada', usersOnly: true },
+      { path: 'branch-administration/tenants', kind: 'Administración de sucursales autorizada', branchesOnly: true },
+    ]) {
+      try { await request(scope.path); return { ...scope, canRegister: false, canAdmin: true } }
+      catch (error) { if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error } }
     }
+    await request('identity-links/received')
+    return { kind: 'Titular autenticado', canRegister: false, personal: true }
   },
   configurationModules: (tenant: string, branch: string) => request<ConfigurationModule[]>('branch-administration/tenants/' + encodeURIComponent(tenant) + '/branches/' + encodeURIComponent(branch) + '/module-configurations'),
   configurationDetail: (scope: ConfigurationScope) => request<ConfigurationDetail>(configurationPath(scope)),
@@ -97,3 +110,7 @@ export type TenantUserChange = { requestId: string; tenantId: string; action: st
 export type TenantUserPage = { users: TenantUser[]; hasMore: boolean; canManage: boolean }
 export type TenantUserDetail = { user: TenantUser; canManage: boolean; history: TenantUserChange[] }
 export type TenantUserResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' | 'DENIED' | 'NOT_FOUND' | 'INVALID' | 'INCOMPLETE_REQUIREMENTS' | 'UNAVAILABLE'; correlation: string; change: TenantUserChange | null; temporaryPassword: string | null }
+
+export type IdentityLink = { id: string; tenantId: string; company: string; status: string; expiresAt: string; createdAt: string; decidedAt: string | null }
+export type IdentityLinkReceipt = { requestId: string; tenantId: string; action: string; linkId: string | null; status: string; createdAt: string }
+export type IdentityLinkResult = { outcome: string; correlation: string; receipt: IdentityLinkReceipt | null }

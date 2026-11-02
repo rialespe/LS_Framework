@@ -3,6 +3,20 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ConnectedCore } from './ConnectedCore'
 
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+it('opens the personal inbox with a verified Core session and no enterprise memberships', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const body = url.endsWith('/session') ? { authenticated: true }
+      : url.includes('/identity-links/received') ? { requests: [], hasMore: false } : { error: 'Unavailable' }
+    const status = url.endsWith('/session') || url.includes('/identity-links/received') ? 200 : 403
+    return { ok: status === 200, status, json: async () => body }
+  }))
+  render(<ConnectedCore />)
+  await screen.findByRole('heading', { name: 'Mis solicitudes de vinculación' })
+  expect(screen.queryByRole('button', { name: 'Crear empresa pendiente' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument()
+  expect(screen.queryByText('Se requiere autoridad global o empresarial expresamente habilitada.')).toBeNull()
+})
+
 it('uses real API contracts, confirms pending data only after confirmation and reconciles an uncertain duplicate safely', async () => {
   let authenticated = false
   let posts = 0
