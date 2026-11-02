@@ -35,7 +35,7 @@ def main():
         root = cluster.root.resolve()
         check(cluster.port not in (5432, 55432) and root.name.startswith('ls-core-migrations-test-')
               and (root / 'data/PG_VERSION').read_text().strip() == '17', 'owned V28 regression cluster only')
-        prepare_database(cluster)
+        prepare_database(cluster, version=28)
         reply = ''
         for role in ('ls_core_platform_mutator_dev', 'ls_core_platform_security_log_dev'):
             cluster.secrets[role] = secrets.token_urlsafe(32)

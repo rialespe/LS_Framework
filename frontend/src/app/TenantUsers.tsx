@@ -1,3 +1,4 @@
+import { IdentityLinks } from './IdentityLinks'
 import { useEffect, useRef, useState } from 'react'
 import { coreApi, CoreFailure } from './coreApi'
 import type { TenantUserDetail, TenantUserPage, TenantUserResult } from './coreApi'
@@ -78,6 +79,7 @@ export function TenantUsers({ tenantId }: { tenantId: string }) {
     })
   }
   return <section aria-label="Usuarios de empresa">
+    <IdentityLinks tenantId={tenantId} />
     <div className="tenant-toolbar"><div><p className="eyebrow">EMPRESAS / USUARIOS</p><h3>Usuarios</h3><p>Identidad global y membresía exclusiva de esta empresa.</p></div><button className="button" disabled={busy} onClick={() => { setDelivery(null); void run(reload) }}>Actualizar usuarios</button></div>
     {message && <p role="status" className="pilot-message">{message}</p>}
     {pending && <div className="tenant-notice"><h4>Operación sin reconciliar</h4><p>Referencia: <code>{pending}</code></p><button className="button" disabled={busy} onClick={() => { void run(async () => { try { await apply(await coreApi.tenantUserOperation(pending), pending, false) } catch (error) { if (error instanceof CoreFailure && error.status === 404) { setMessage('Todavía no hay un recibo confirmado. Conserva la referencia; no repitas el comando.') } else { throw error } } }) }}>Consultar resultado de incorporación</button></div>}
