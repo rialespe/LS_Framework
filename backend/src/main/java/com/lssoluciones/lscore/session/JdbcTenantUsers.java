@@ -470,7 +470,7 @@ public final class JdbcTenantUsers {
         return value == null ? null : value.toInstant();
     }
 
-    private static boolean authorized(
+    static boolean authorized(
             Connection connection, UUID actor, UUID tenant, boolean mutating) throws SQLException {
         try (var statement = connection.prepareStatement("SELECT tenant.user_authority(?,?,?)")) {
             statement.setObject(1, actor);
@@ -496,7 +496,7 @@ public final class JdbcTenantUsers {
         }
     }
 
-    private static void lock(Connection connection, boolean reading) throws SQLException {
+    static void lock(Connection connection, boolean reading) throws SQLException {
         try (var statement = connection.createStatement()) {
             statement.execute(
                     reading

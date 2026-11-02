@@ -75,13 +75,16 @@ class PilotAccount {
                 var authentication = new JdbcPasswordAuthentication(source(JdbcPasswordAuthentication.ROLE), JdbcPasswordAuthentication.Limits.defaults());
                 new JdbcPlatformBootstrap(source(JdbcPlatformBootstrap.ROLE), authentication).initialize(coreName, password);
             }
-            // Administrative fixture only. All later functional traffic uses the V16 restricted LOGIN.
-            try (var admin = source("postgres").getConnection(); var sql = admin.createStatement()) {
-                sql.execute(Files.readString(Path.of(args[0]), StandardCharsets.UTF_8).replace("__USER__", user.toString()));
-                sql.execute("INSERT INTO tenant.administrators(tenant_id,membership_id,status,granted_at) "
-                        + "VALUES ('35000000-0000-0000-0000-000000000010','35000000-0000-0000-0000-000000000110','ACTIVE',clock_timestamp())");
+            // Fiscal/POS fixtures belong only to the explicitly selected Fiscal pilot.
+            // Core creates its companies through the real administrative API instead.
+            if (args.length == 1) {
+                try (var admin = source("postgres").getConnection(); var sql = admin.createStatement()) {
+                    sql.execute(Files.readString(Path.of(args[0]), StandardCharsets.UTF_8).replace("__USER__", user.toString()));
+                    sql.execute("INSERT INTO tenant.administrators(tenant_id,membership_id,status,granted_at) "
+                            + "VALUES ('35000000-0000-0000-0000-000000000010','35000000-0000-0000-0000-000000000110','ACTIVE',clock_timestamp())");
+                }
             }
-            System.out.println("Disposable pilot account and V17 context fixture prepared.");
+            System.out.println("Disposable pilot accounts prepared.");
         } catch (Exception failure) {
             System.err.println("Disposable pilot account unavailable; diagnostics withheld.");
             System.exit(1);

@@ -1,3 +1,4 @@
+import { TenantAccessReceipt } from './TenantAccess'
 import { IdentityLinks } from './IdentityLinks'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TenantUsersWorkspace, TemporaryPasswordExchange, TenantUserReceipt } from './TenantUsers'
@@ -100,6 +101,7 @@ export function ConnectedCore() {
         <div className="access-field"><label htmlFor="core-password">Contraseña</label><input id="core-password" name="password" type="password" autoComplete="current-password" required maxLength={1024} disabled={busy} /></div><button className="button" disabled={busy}>Ingresar</button></form>}
       {phase === 'denied' && <section className="preview-panel"><p>Se requiere autoridad global o empresarial expresamente habilitada.</p><button className="button" disabled={busy} onClick={logout}>Cerrar sesión</button><button className="button" onClick={() => { void refresh() }}>Comprobar acceso</button></section>}
       {(phase === 'login' || phase === 'denied') && <TenantUserReceipt />}
+      {phase !== 'checking' && <TenantAccessReceipt />}
       {phase === 'login' && <TemporaryPasswordExchange />}
       {(phase === 'workspace' || phase === 'personal' || phase === 'denied') && <IdentityLinks />}
       {phase === 'workspace' && section === 'users' && <TenantUsersWorkspace />}
