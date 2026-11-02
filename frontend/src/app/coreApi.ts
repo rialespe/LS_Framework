@@ -11,13 +11,18 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   }
   const response = await fetch('/api/auth/core/' + action, { credentials: 'same-origin', cache: 'no-store',
     method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) })
-  if (!response.ok && !(resultBody && [403, 404, 409, 422, 503].includes(response.status))) { throw new CoreFailure(response.status) }
+  if (!response.ok && !(resultBody && [400, 403, 404, 409, 422, 503].includes(response.status))) { throw new CoreFailure(response.status) }
   if (response.status === 204) { return undefined as T }
   const result = await response.json()
   if (resultBody && !response.ok && (!result || typeof result.outcome !== 'string')) { throw new CoreFailure(response.status) }
   return result as T
 }
 export const coreApi = {
+  rbacTenants: () => request<{ id: string; name: string; status: string }[]>('rbac/tenants'),
+  rbacApplications: (tenant: string) => request<RbacApplication[]>('rbac/tenants/' + encodeURIComponent(tenant) + '/applications'),
+  rbacWorkspace: (tenant: string, application: string) => request<RbacWorkspace>(rbacPath(tenant, application)),
+  rbacMutation: (tenant: string, application: string, action: RbacAction, requestId: string, input: RbacInput, password: string) => request<RbacResult>(rbacPath(tenant, application) + '/commands/' + action, { requestId, ...input, password }, true),
+  rbacOperation: (id: string) => request<RbacResult>('rbac/operations/' + encodeURIComponent(id)),
   tenantAccess: (tenant: string, member: string) => request<TenantAccessSnapshot>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users/' + encodeURIComponent(member) + '/access'),
   tenantAccessOperation: (id: string) => request<TenantAccessResult>('tenant-users/access-operations/' + encodeURIComponent(id)),
   tenantAccessMutation: (tenant: string, member: string, branch: string | null, action: 'suspend' | 'reactivate', requestId: string, expectedUpdatedAt: string, password: string) => request<TenantAccessResult>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users/' + encodeURIComponent(member) + (branch ? '/branch-accesses/' + encodeURIComponent(branch) : '/access') + '/' + action, { requestId, expectedUpdatedAt, password }, true),
@@ -33,7 +38,7 @@ export const coreApi = {
   tenantUserOperation: (id: string) => request<TenantUserResult>('tenant-users/operations/' + encodeURIComponent(id)),
   tenantUserMutation: (tenant: string, action: 'create' | 'activate' | 'reissue', id: string | null, requestId: string, input: { username: string; displayName: string; email: string | null }, password: string) => request<TenantUserResult>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users' + (action === 'create' ? '' : '/' + encodeURIComponent(id!) + '/' + action), { requestId, ...(action === 'create' ? input : {}), password }, true),
   async login(username: string, password: string) { await request('login', { username, password }); await request('csrf') },
-  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean; usersOnly?: boolean; personal?: boolean }> {
+  async authority(): Promise<{ kind: string; canRegister: boolean; canAdmin?: boolean; tenantOnly?: boolean; branchesOnly?: boolean; usersOnly?: boolean; rbacOnly?: boolean; personal?: boolean }> {
     await request('session')
     try { return await request<{ kind: string; canRegister: boolean }>('authority') }
     catch (error) { if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error } }
@@ -43,6 +48,7 @@ export const coreApi = {
       { path: 'administrator-tenants', kind: 'Administración empresarial autorizada', tenantOnly: true },
       { path: 'tenant-users/tenants', kind: 'Administración de usuarios autorizada', usersOnly: true },
       { path: 'branch-administration/tenants', kind: 'Administración de sucursales autorizada', branchesOnly: true },
+      { path: 'rbac/tenants', kind: 'Administración RBAC autorizada', rbacOnly: true },
     ]) {
       try { await request(scope.path); return { ...scope, canRegister: false, canAdmin: true } }
       catch (error) { if (!(error instanceof CoreFailure && [403, 404].includes(error.status))) { throw error } }
@@ -120,3 +126,13 @@ export type IdentityLinkResult = { outcome: string; correlation: string; receipt
 export type TenantAccessChange = { requestId: string; tenantId: string; membershipId: string; branchMembershipId: string | null; branchId: string | null; action: string; previousStatus: string; resultingStatus: string; revokedContexts: number; updatedAt: string; createdAt: string; actorId: string; expectedUpdatedAt: string }
 export type TenantAccessResult = { outcome: string; correlation: string; receipt: TenantAccessChange | null }
 export type TenantAccessSnapshot = { membershipId: string; status: string; updatedAt: string; tenantStatus: string; f04Ready: boolean; administrativeDesignation: boolean; globalOwner: boolean; canManage: boolean; revokedContexts: number; branches: { id: string; branchId: string; name: string; branchStatus: string; accessStatus: string; updatedAt: string; revokedContexts: number }[]; history: TenantAccessChange[] }
+const rbacPath = (tenant: string, application: string) => 'rbac/tenants/' + encodeURIComponent(tenant) + '/applications/' + encodeURIComponent(application)
+export type RbacAction = 'role-create' | 'role-update' | 'role-disable' | 'role-template' | 'profile-create' | 'profile-update' | 'profile-disable' | 'profile-template'
+export type RbacInput = { resourceId: string | null; templateId: string | null; expectedRevision: number | null; code: string | null; name: string | null; description: string | null; permissionIds: string[]; roleIds: string[] }
+export type RbacApplication = { id: string; code: string; name: string; status: string }
+export type RbacResource = { id: string; code: string; name: string; description: string | null; status: string; revision: number; sourceTemplateId: string | null; sourceVersion: number | null; permissionIds?: string[]; roleIds?: string[] }
+export type RbacReceipt = { requestId: string; tenantId: string; applicationId: string; action: string; resourceId: string; previous: RbacResource | null; result: RbacResource; createdAt: string; actorId: string }
+export type RbacResult = { outcome: string; correlation: string; receipt: RbacReceipt | null }
+export type RbacPermission = { id: string; moduleId: string | null; code: string; name: string; scope: string; status: string; privilegeKind: string | null; delegable: boolean }
+export type RbacTemplate = { id: string; code: string; name: string; version: number; items: string[]; delegable: boolean }
+export type RbacWorkspace = { canManage: boolean; modules: { id: string; code: string; name: string; status: string }[]; permissions: RbacPermission[]; roleTemplates: RbacTemplate[]; profileTemplates: RbacTemplate[]; roles: RbacResource[]; profiles: RbacResource[]; history: RbacReceipt[] }

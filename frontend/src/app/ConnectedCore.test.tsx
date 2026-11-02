@@ -3,6 +3,16 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ConnectedCore } from './ConnectedCore'
 
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+it('opens the RBAC workspace only after its own tenant authority endpoint succeeds', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const allowed = url.endsWith('/session') || url.endsWith('/rbac/tenants')
+    return { ok: allowed, status: allowed ? 200 : 403, json: async () => url.endsWith('/session') ? { authenticated: true } : url.endsWith('/rbac/tenants') ? [{ id: 'tenant', name: 'Empresa RBAC', status: 'ACTIVE' }] : { error: 'Unavailable' } }
+  }))
+  render(<ConnectedCore />)
+  await screen.findByRole('heading', { name: 'Empresas → Roles y perfiles' })
+  expect(screen.getByLabelText('Empresa RBAC autorizada')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Crear empresa pendiente' })).toBeNull()
+})
 it('opens the personal inbox with a verified Core session and no enterprise memberships', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const body = url.endsWith('/session') ? { authenticated: true }

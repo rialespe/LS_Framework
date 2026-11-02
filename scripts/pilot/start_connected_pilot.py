@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V30, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V31, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -27,7 +27,7 @@ FRONTEND = ROOT / 'frontend'
 URL = 'https://127.0.0.1:5174'
 
 
-def prepare_database(cluster, version=30):
+def prepare_database(cluster, version=31):
     prepare_fixture(cluster)
     for database in ('postgres', 'template1'):
         check(cluster.psql(sql=f'REVOKE CONNECT,TEMPORARY ON DATABASE {database} FROM PUBLIC').returncode == 0,
@@ -55,7 +55,8 @@ def prepare_database(cluster, version=30):
             (['ls_core_branch_guard_dev', 'ls_core_branch_history_dev'], 'prepare_branch_operation_guards.sql', '27'),
             (['ls_core_tenant_users_dev', 'ls_core_tenant_users_log_dev'], 'prepare_tenant_users.sql', '28'),
             (['ls_core_identity_links_dev', 'ls_core_identity_links_log_dev'], 'prepare_identity_links.sql', '29'),
-            (['ls_core_tenant_access_dev', 'ls_core_tenant_access_log_dev'], 'prepare_tenant_access.sql', '30')]:
+            (['ls_core_tenant_access_dev', 'ls_core_tenant_access_log_dev'], 'prepare_tenant_access.sql', '30'),
+            (['ls_core_tenant_rbac_dev', 'ls_core_tenant_rbac_log_dev'], 'prepare_tenant_rbac.sql', '31')]:
         if int(target) > version:
             break
         reply = ''
@@ -82,6 +83,8 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
         check('id="root"' in response.read().decode(), 'Core React entry over same-origin HTTPS')
     with opener.open(URL + '/src/app/ConnectedCore.tsx', timeout=5) as response:
         check(response.status == 200, 'Core React form transforms through Vite')
+    with opener.open(URL + '/src/app/TenantRbac.tsx', timeout=5) as response:
+        check(response.status == 200, 'connected RBAC workspace transforms through real Vite HTTPS')
     with post('login', {'username': username, 'password': password}) as response:
         check(response.status == 204, 'real independent Core HTTPS login')
     check(get('authority')['canRegister'], 'real global registration authority')
@@ -175,6 +178,7 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
             branches.append(result['change']['branch']['id'])
         check(get('branch-administration/operations/' + operation)['outcome'] == 'CONFIRMED', 'branch creation receipt persisted')
     access_lifecycle_smoke(cluster, ssl_context, post, get, tenant_id, link_tenant, branches, member_id, new_username, password)
+    rbac_smoke(cluster, post, get, tenant_id, password)
     install_history_fixture(cluster, tenant_id)
     check(check_branch_read(cluster, tenant_id, branches[1], username, password), 'ACTIVE bounded read permitted')
     for action, state in [('suspend', 'SUSPENDED'), ('reactivate', 'ACTIVE'), ('close', 'CLOSED')]:
@@ -226,6 +230,92 @@ def install_history_fixture(cluster, tenant_id):
     check(cluster.port not in (5432, 55432) and (cluster.root / 'data/PG_VERSION').read_text().strip() == '17', 'owned history fixture only')
     result = cluster.psql(sql=(ROOT / 'scripts/pilot/branch_history_fixture.sql').read_text(encoding='utf-8').replace('__TENANT__', selected))
     check(result.returncode == 0, 'explicit disposable historical grants; no business write grant')
+
+
+def install_rbac_fixture(cluster, tenant):
+    """Explicit owned installation policy, using only the nine approved V8 permissions."""
+    import uuid
+    tenant = str(uuid.UUID(tenant))
+    check(cluster.port not in (5432, 55432) and cluster.root.resolve().name.startswith('ls-core-migrations-test-')
+          and (cluster.root / 'data/PG_VERSION').read_text().strip() == '17', 'owned RBAC policy fixture only')
+    app = '3bc09866-f9f0-573c-82a0-fd72ec6be41f'
+    setup = """BEGIN;
+SELECT pg_advisory_xact_lock(370019,1); SELECT pg_advisory_xact_lock(410023,1);
+DO $$ DECLARE company uuid='__TENANT__'; app uuid='3bc09866-f9f0-573c-82a0-fd72ec6be41f'; BEGIN
+ IF NOT EXISTS(SELECT FROM tenant.initial_registrations r JOIN tenant.tenants t ON t.id=r.tenant_id
+ JOIN platform.administrators a ON a.user_id=r.actor_user_id WHERE t.id=company AND t.status='ACTIVE'
+ AND a.administrator_kind='OWNER' AND a.status='ACTIVE' AND a.revoked_at IS NULL)
+ OR EXISTS(SELECT FROM platform.rbac_permission_delegations WHERE tenant_id=company)
+ OR EXISTS(SELECT FROM platform.rbac_administrator_grants WHERE tenant_id=company)
+ OR EXISTS(SELECT FROM catalog.tenant_applications WHERE tenant_id=company AND application_id=app AND status<>'ACTIVE')
+ OR EXISTS(SELECT FROM catalog.tenant_modules WHERE tenant_id=company AND application_id=app AND status<>'ACTIVE')
+ THEN RAISE EXCEPTION 'Explicit fresh compatible owned RBAC scope required'; END IF;
+ INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) SELECT company,app,'ACTIVE'
+ WHERE NOT EXISTS(SELECT FROM catalog.tenant_applications WHERE tenant_id=company AND application_id=app);
+ INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) SELECT company,app,m.id,'ACTIVE'
+ FROM catalog.modules m WHERE m.application_id=app AND m.status='PUBLISHED' AND m.code IN ('branches','memberships','access')
+ AND NOT EXISTS(SELECT FROM catalog.tenant_modules tm WHERE tm.tenant_id=company AND tm.application_id=app AND tm.module_id=m.id);
+END $$; COMMIT;""".replace('__TENANT__', tenant)
+    check(cluster.psql(sql=setup).returncode == 0, 'explicit Core-only entitlement installation; no automatic tenant activation side effect')
+    expires = cluster.query("SELECT to_char(clock_timestamp()+interval '2 hours','YYYY-MM-DD\"T\"HH24:MI:SSOF')")
+    def install(script, values):
+        # Only canonical UUIDs, fixed policy enums and a PostgreSQL timestamp are serialized here.
+        check(all(not any(char in str(value) for char in ("'", '\n', '\r', '\\')) for value in values.values()), 'bounded installation selectors')
+        commands = ''.join("\\set " + name + " '" + str(value) + "'\n" for name, value in values.items())
+        path = cluster.root / 'rbac-install.sql'
+        path.write_text(commands + (ROOT / 'scripts/migrations' / script).read_text(encoding='utf-8'), encoding='utf-8')
+        check(cluster.psql(script=path, apply=True).returncode == 0, 'platform RBAC policy installed with atomic evidence')
+    approved = ('branches.read', 'memberships.read', 'roles.read', 'roles.manage', 'profiles.read', 'profiles.manage', 'assignments.read', 'assignments.manage', 'consolidated.read')
+    permissions = json.loads(cluster.query("SELECT json_agg(json_build_object('id',id,'code',code)) FROM security.permissions WHERE application_id='" + app + "' AND status='PUBLISHED'"))
+    check(len(permissions) == 9 and {p['code'] for p in permissions} == set(approved), 'closed approved V8 catalog only')
+    for permission in permissions:
+        install('grant_tenant_rbac_permission.sql', {'tenant_id': tenant, 'application_id': app, 'permission_id': permission['id'],
+                'privilege_kind': 'WRITE' if permission['code'] in ('roles.manage', 'profiles.manage', 'assignments.manage') else 'READ', 'expires_at': expires})
+    designations = json.loads(cluster.query("SELECT json_agg(id) FROM tenant.valid_administrators('" + tenant + "')"))
+    check(bool(designations), 'valid tenant administrators selected by PostgreSQL')
+    for designation in designations:
+        for capability in ('READ', 'MANAGE'):
+            install('grant_tenant_rbac_administrator.sql', {'tenant_id': tenant, 'application_id': app, 'designation_id': designation,
+                    'kind': 'TENANT', 'capability': capability, 'expires_at': expires})
+    print('DISPOSABLE RBAC: explicit delegation ceiling installed. No roles, profiles or branch assignments were initialized.', flush=True)
+
+
+def rbac_smoke(cluster, post, get, tenant, password):
+    import uuid
+    app = '3bc09866-f9f0-573c-82a0-fd72ec6be41f'
+    path = 'rbac/tenants/' + tenant + '/applications/' + app
+    published = get(path)
+    check(len(published['permissions']) == 9 and not any(p['delegable'] for p in published['permissions']), 'published catalog alone grants no tenant delegation')
+    install_rbac_fixture(cluster, tenant)
+    available = get(path)
+    check(all(p['delegable'] for p in available['permissions']), 'real approved V8 permission ceiling and enabled modules')
+    before = cluster.query('SELECT count(*) FROM security.branch_profile_assignments')
+    def mutate(action, **values):
+        reference = str(uuid.uuid4())
+        with post(path + '/commands/' + action, {'requestId': reference, 'password': password, **values}) as response:
+            result = json.load(response)
+            check(result['outcome'] == 'CONFIRMED', 'real HTTPS RBAC ' + action)
+        check(get('rbac/operations/' + reference)['receipt']['resourceId'] == result['receipt']['resourceId'], 'RBAC receipt reconciled from PostgreSQL')
+        return result['receipt']['result']
+    reader = mutate('profile-template', templateId='a2ff7d6a-ded6-5fdc-81e7-8e103dde3f77')
+    mutate('profile-template', templateId='61e78d0c-1c59-5263-870a-4bc69a9319e6')
+    permission_ids = [p['id'] for p in available['permissions'] if p['code'] in ('branches.read', 'roles.read')]
+    custom = mutate('role-create', code='pilot_custom_reader', name='Lector personalizado del piloto', permissionIds=permission_ids)
+    profile = mutate('profile-create', code='pilot_review_team', name='Equipo del piloto', roleIds=[custom['id'], reader['roleIds'][0]])
+    check(cluster.query("SELECT count(*) FROM security.profile_roles WHERE tenant_id='" + tenant + "' AND profile_id='" + profile['id'] + "'") == '2', 'profile with two tenant roles persisted')
+    check(cluster.query("SELECT count(*) FROM security.role_permissions WHERE role_id='" + custom['id'] + "'") == '2', 'custom role permission composition persisted')
+    module = 'e2d0f4fe-ce53-50c5-b24d-e7167af48761'
+    check(cluster.psql(sql="UPDATE catalog.tenant_modules SET status='DISABLED' WHERE tenant_id='" + tenant + "' AND application_id='" + app + "' AND module_id='" + module + "'").returncode == 0, 'owned negative fixture disables one Core module')
+    try:
+        try:
+            post(path + '/commands/role-create', {'requestId': str(uuid.uuid4()), 'code': 'unavailable_module', 'name': 'Debe rechazarse', 'permissionIds': [permission_ids[0]], 'password': password})
+            raise AssertionError('Disabled module must reject RBAC permission selection')
+        except urllib.error.HTTPError as rejected:
+            check(rejected.code == 403, 'disabled module permission rejected through real HTTPS')
+            rejected.close()
+    finally:
+        check(cluster.psql(sql="UPDATE catalog.tenant_modules SET status='ACTIVE' WHERE tenant_id='" + tenant + "' AND application_id='" + app + "' AND module_id='" + module + "'").returncode == 0, 'owned module state restored')
+    check(cluster.query('SELECT count(*) FROM security.branch_profile_assignments') == before, 'RBAC initialization created no branch profile assignments')
 
 
 def install_access_assignment(cluster, tenant, membership, branch):
@@ -411,9 +501,11 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_TENANTACCESS_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
+                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_TENANTRBAC_ENABLED='true', LS_CORE_TENANTACCESS_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
-                for prefix, role in [('LS_TENANT_ACCESS_DB_', 'ls_core_tenant_access_dev'),
+                for prefix, role in [('LS_TENANT_RBAC_DB_', 'ls_core_tenant_rbac_dev'),
+                                     ('LS_TENANT_RBAC_LOG_DB_', 'ls_core_tenant_rbac_log_dev'),
+                                     ('LS_TENANT_ACCESS_DB_', 'ls_core_tenant_access_dev'),
                                      ('LS_TENANT_ACCESS_LOG_DB_', 'ls_core_tenant_access_log_dev'),
                                      ('LS_IDENTITY_LINKS_DB_', 'ls_core_identity_links_dev'),
                                      ('LS_IDENTITY_LINKS_LOG_DB_', 'ls_core_identity_links_log_dev'),
@@ -493,12 +585,17 @@ def main():
                 check(opener.open(request, timeout=10).status == 204, 'real logout through proxy')
             elif options.core:
                 print('Catalogo real sin contratos especializados. Para un ejemplo NO PRODUCTIVO, crea y activa una empresa en la UI.', flush=True)
-                print('Comando: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | fixture-access <UUID_EMPRESA> <UUID_MEMBRESIA> <UUID_SUCURSAL> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir. Solo cluster desechable.', flush=True)
+                print('Comando: fixture-rbac <UUID_EMPRESA> | fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | fixture-access <UUID_EMPRESA> <UUID_MEMBRESIA> <UUID_SUCURSAL> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir. Solo cluster desechable.', flush=True)
                 while all(child.poll() is None for child in children):
                     command = input('Piloto Core> ').strip()
                     if command == 'salir':
                         break
-                    if command.startswith('fixture-history '):
+                    if command.startswith('fixture-rbac '):
+                        try:
+                            install_rbac_fixture(cluster, command.removeprefix('fixture-rbac ').strip())
+                        except (ValueError, AssertionError):
+                            print('RBAC fixture unavailable, incompatible state or already installed.', flush=True)
+                    elif command.startswith('fixture-history '):
                         try:
                             install_history_fixture(cluster, command.removeprefix('fixture-history ').strip())
                         except (ValueError, AssertionError):
@@ -521,7 +618,7 @@ def main():
                         except (ValueError, AssertionError):
                             print('Fixture no instalado. Usa una empresa activa creada por el OWNER de este piloto y no repitas una instalacion existente.', flush=True)
                     else:
-                        print('Comandos disponibles: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir', flush=True)
+                        print('Comandos disponibles: fixture-rbac <UUID_EMPRESA> | fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir', flush=True)
             else:
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)
