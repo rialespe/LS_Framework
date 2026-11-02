@@ -18,6 +18,9 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   return result as T
 }
 export const coreApi = {
+  tenantAccess: (tenant: string, member: string) => request<TenantAccessSnapshot>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users/' + encodeURIComponent(member) + '/access'),
+  tenantAccessOperation: (id: string) => request<TenantAccessResult>('tenant-users/access-operations/' + encodeURIComponent(id)),
+  tenantAccessMutation: (tenant: string, member: string, branch: string | null, action: 'suspend' | 'reactivate', requestId: string, expectedUpdatedAt: string, password: string) => request<TenantAccessResult>('tenant-users/tenants/' + encodeURIComponent(tenant) + '/users/' + encodeURIComponent(member) + (branch ? '/branch-accesses/' + encodeURIComponent(branch) : '/access') + '/' + action, { requestId, expectedUpdatedAt, password }, true),
   identityLinksReceived: (page = 0) => request<{ requests: IdentityLink[]; hasMore: boolean }>('identity-links/received?page=' + page),
   identityLinksSent: (tenant: string, page = 0) => request<{ requests: IdentityLinkReceipt[]; hasMore: boolean }>('identity-links/tenants/' + encodeURIComponent(tenant) + '/sent?page=' + page),
   identityLinkRequest: (tenant: string, requestId: string, username: string, password: string) => request<IdentityLinkResult>('identity-links/tenants/' + encodeURIComponent(tenant) + '/requests', { requestId, username, password }, true),
@@ -114,3 +117,6 @@ export type TenantUserResult = { outcome: 'CONFIRMED' | 'UNKNOWN' | 'CONFLICT' |
 export type IdentityLink = { id: string; tenantId: string; company: string; status: string; expiresAt: string; createdAt: string; decidedAt: string | null }
 export type IdentityLinkReceipt = { requestId: string; tenantId: string; action: string; linkId: string | null; status: string; createdAt: string }
 export type IdentityLinkResult = { outcome: string; correlation: string; receipt: IdentityLinkReceipt | null }
+export type TenantAccessChange = { requestId: string; tenantId: string; membershipId: string; branchMembershipId: string | null; branchId: string | null; action: string; previousStatus: string; resultingStatus: string; revokedContexts: number; updatedAt: string; createdAt: string; actorId: string; expectedUpdatedAt: string }
+export type TenantAccessResult = { outcome: string; correlation: string; receipt: TenantAccessChange | null }
+export type TenantAccessSnapshot = { membershipId: string; status: string; updatedAt: string; tenantStatus: string; f04Ready: boolean; administrativeDesignation: boolean; globalOwner: boolean; canManage: boolean; revokedContexts: number; branches: { id: string; branchId: string; name: string; branchStatus: string; accessStatus: string; updatedAt: string; revokedContexts: number }[]; history: TenantAccessChange[] }

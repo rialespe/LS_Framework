@@ -92,7 +92,7 @@ jobs:
         env:
           LS_PG_BIN: /usr/lib/postgresql/17/bin
         run: python3 scripts/tests/postgres_operation_evidence_poc.py
-      - name: LFD-47 consent and LFD-46 regression on V29
+      - name: LFD-48 lifecycle and focused F05/F07/F08/LFD-46/LFD-47 regressions on V30
         env:
           LS_PG_BIN: /usr/lib/postgresql/17/bin
-        run: python3 scripts/tests/postgres_identity_links_contract.py
+        run: python3 scripts/tests/postgres_tenant_access_contract.py

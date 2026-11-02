@@ -11,7 +11,7 @@ from start_connected_pilot import prepare_database
 def main():
     with disposable_cluster() as cluster:
         check(cluster.port not in (5432, 55432), 'owned ephemeral PG17 only')
-        prepare_database(cluster)
+        prepare_database(cluster, version=29)
         if '--migrate-only' in sys.argv:
             return
         reply = ''

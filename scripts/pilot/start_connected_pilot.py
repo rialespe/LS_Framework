@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V29, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V30, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -27,7 +27,7 @@ FRONTEND = ROOT / 'frontend'
 URL = 'https://127.0.0.1:5174'
 
 
-def prepare_database(cluster, version=29):
+def prepare_database(cluster, version=30):
     prepare_fixture(cluster)
     for database in ('postgres', 'template1'):
         check(cluster.psql(sql=f'REVOKE CONNECT,TEMPORARY ON DATABASE {database} FROM PUBLIC').returncode == 0,
@@ -54,7 +54,8 @@ def prepare_database(cluster, version=29):
             (['ls_core_branch_config_dev', 'ls_core_branch_config_log_dev'], 'prepare_branch_configuration.sql', '26'),
             (['ls_core_branch_guard_dev', 'ls_core_branch_history_dev'], 'prepare_branch_operation_guards.sql', '27'),
             (['ls_core_tenant_users_dev', 'ls_core_tenant_users_log_dev'], 'prepare_tenant_users.sql', '28'),
-            (['ls_core_identity_links_dev', 'ls_core_identity_links_log_dev'], 'prepare_identity_links.sql', '29')]:
+            (['ls_core_identity_links_dev', 'ls_core_identity_links_log_dev'], 'prepare_identity_links.sql', '29'),
+            (['ls_core_tenant_access_dev', 'ls_core_tenant_access_log_dev'], 'prepare_tenant_access.sql', '30')]:
         if int(target) > version:
             break
         reply = ''
@@ -67,7 +68,7 @@ def prepare_database(cluster, version=29):
     check(cluster.flyway('validate', location=SOURCE, target=str(version)).returncode == 0, 'Flyway validates V1-V' + str(version))
 
 
-def core_smoke(opener, username, initial_username, second_username, password, cluster):
+def core_smoke(opener, username, initial_username, second_username, password, cluster, ssl_context):
     import uuid
     def get(action):
         with opener.open(URL + '/api/auth/core/' + action, timeout=10) as response:
@@ -173,6 +174,7 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
             check(response.status == 201 and result['outcome'] == 'CONFIRMED', 'real branch creation ' + code)
             branches.append(result['change']['branch']['id'])
         check(get('branch-administration/operations/' + operation)['outcome'] == 'CONFIRMED', 'branch creation receipt persisted')
+    access_lifecycle_smoke(cluster, ssl_context, post, get, tenant_id, link_tenant, branches, member_id, new_username, password)
     install_history_fixture(cluster, tenant_id)
     check(check_branch_read(cluster, tenant_id, branches[1], username, password), 'ACTIVE bounded read permitted')
     for action, state in [('suspend', 'SUSPENDED'), ('reactivate', 'ACTIVE'), ('close', 'CLOSED')]:
@@ -224,6 +226,93 @@ def install_history_fixture(cluster, tenant_id):
     check(cluster.port not in (5432, 55432) and (cluster.root / 'data/PG_VERSION').read_text().strip() == '17', 'owned history fixture only')
     result = cluster.psql(sql=(ROOT / 'scripts/pilot/branch_history_fixture.sql').read_text(encoding='utf-8').replace('__TENANT__', selected))
     check(result.returncode == 0, 'explicit disposable historical grants; no business write grant')
+
+
+def install_access_assignment(cluster, tenant, membership, branch):
+    """One explicit development assignment, only in this process's disposable cluster."""
+    import uuid
+    tenant, membership, branch = (str(uuid.UUID(value)) for value in (tenant, membership, branch))
+    check(cluster.port not in (5432, 55432) and cluster.root.resolve().name.startswith('ls-core-migrations-test-')
+          and (cluster.root / 'data/PG_VERSION').read_text().strip() == '17', 'owned assignment fixture only')
+    result = cluster.psql(sql="BEGIN; SELECT pg_advisory_xact_lock(370019,1); SELECT pg_advisory_xact_lock(410023,1); "
+        + "DO $$ DECLARE selected uuid; BEGIN SELECT m.id INTO STRICT selected FROM tenant.memberships m "
+        + "JOIN tenant.tenants t ON t.id=m.tenant_id JOIN tenant.branches b ON b.tenant_id=t.id "
+        + "WHERE t.id='" + tenant + "' AND m.id='" + membership + "' AND b.id='" + branch + "' "
+        + "AND t.status='ACTIVE' AND m.status='ACTIVE' AND b.status='ACTIVE' FOR SHARE OF t,m,b; "
+        + "INSERT INTO tenant.branch_memberships(tenant_id,membership_id,branch_id,status) VALUES('" + tenant + "',selected,'" + branch + "','ACTIVE'); END $$; COMMIT;")
+    check(result.returncode == 0, 'DISPOSABLE ONLY: one explicit assignment; no profiles, permissions or duplicate adoption')
+
+
+def access_lifecycle_smoke(cluster, ssl_context, post, get, tenant, other, branches, member, username, password):
+    """Explicit disposable assignments; real Core cookies and F05 contexts, no Fiscal/POS business rows."""
+    import uuid
+    check(cluster.port not in (5432, 55432) and cluster.root.resolve().name.startswith('ls-core-migrations-test-'), 'owned access fixture only')
+    with post('branch-administration/tenants/' + other + '/branches', {'requestId': str(uuid.uuid4()), 'code': 'CASA MATRIZ', 'name': 'CASA MATRIZ', 'password': password}) as response:
+        foreign_branch = json.load(response)['change']['branch']['id']
+    foreign_member = next(u['id'] for u in get('tenant-users/tenants/' + other + '/users')['users'] if u['username'] == username)
+    for company, membership, selected in [(tenant, member, branches), (other, foreign_member, [foreign_branch])]:
+        company, membership = str(uuid.UUID(company)), str(uuid.UUID(membership))
+        for branch in selected:
+            branch = str(uuid.UUID(branch))
+            check(cluster.psql(sql="INSERT INTO tenant.branch_memberships(tenant_id,membership_id,branch_id,status) SELECT tenant_id,id,'" + branch + "','ACTIVE' FROM tenant.memberships WHERE tenant_id='" + company + "' AND id='" + membership + "'").returncode == 0,
+                  'DISPOSABLE ONLY: explicit existing branch assignment; no new profiles or permissions')
+    app = cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core'")
+    branches_module = cluster.query("SELECT id FROM catalog.modules WHERE application_id='" + app + "' AND code='branches'")
+    for company in (tenant, other):
+        # No silent adoption: an unexpected preexisting entitlement fails this owned fixture.
+        check(cluster.psql(sql="INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) VALUES('" + company + "','" + app + "','ACTIVE'); INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) VALUES('" + company + "','" + app + "','" + branches_module + "','ACTIVE')").returncode == 0,
+              'disposable Core-only context eligibility')
+    clients = []
+    for unused in range(3):
+        jar = http.cookiejar.CookieJar()
+        client = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context), urllib.request.HTTPCookieProcessor(jar))
+        with client.open(URL + '/api/auth/core/csrf', timeout=10) as response:
+            csrf = json.load(response)['csrfToken']
+        request = urllib.request.Request(URL + '/api/auth/core/login', method='POST', data=json.dumps({'username': username, 'password': password}).encode(),
+                                         headers={'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf})
+        with client.open(request, timeout=15) as response:
+            check(response.status == 204, 'independent real Core holder session')
+        clients.append((client, next(cookie.value for cookie in jar if cookie.name == '__Secure-LS-CORE-SESSION')))
+    def select_context(index, company, branch):
+        env = environment()
+        env.update(LS_PILOT_ROOT=str(cluster.root), LS_PILOT_PORT=str(cluster.port), LS_PILOT_CORE_APP=app)
+        for role in ('ls_core_session_manager_dev', 'ls_core_password_authenticator_dev'):
+            env['LS_PILOT_' + role.upper()] = cluster.secrets[role]
+        java = Path(env['JAVA_HOME']) / 'bin/java.exe'
+        classpath = str(BACKEND / 'target/classes') + os.pathsep + (cluster.root / 'classpath.txt').read_text(encoding='utf-8').strip()
+        result = cluster.run([java, '--class-path', classpath, ROOT / 'scripts/pilot/PilotAccessContext.java', company, branch], input_text=clients[index][1], env=env, timeout=30)
+        check(result.returncode == 0 and 'CONTEXT_ID=' in result.stdout, 'owned F05 Core context selected from real HTTPS cookie; cookie withheld')
+        return str(uuid.UUID(result.stdout.split('CONTEXT_ID=')[1].strip()))
+    matrix_context = select_context(0, tenant, branches[0])
+    second_context = select_context(1, tenant, branches[1])
+    foreign_context = select_context(2, other, foreign_branch)
+    path = 'tenant-users/tenants/' + tenant + '/users/' + member
+    def mutate(action, branch=None):
+        snapshot = get(path + '/access')
+        selected = next(b for b in snapshot['branches'] if b['id'] == branch) if branch else snapshot
+        operation = str(uuid.uuid4())
+        with post(path + ('/branch-accesses/' + branch if branch else '/access') + '/' + action,
+                  {'requestId': operation, 'expectedUpdatedAt': selected['updatedAt'], 'password': password}) as response:
+            check(json.load(response)['outcome'] == 'CONFIRMED', 'real HTTPS individual lifecycle ' + action)
+        check(get('tenant-users/access-operations/' + operation)['outcome'] == 'CONFIRMED', 'access receipt and atomic evidence persisted')
+    def revoked(context):
+        return cluster.query("SELECT revoked_at IS NOT NULL FROM security.session_contexts WHERE id='" + context + "'") == 't'
+    mutate('suspend')
+    check(revoked(matrix_context) and revoked(second_context) and not revoked(foreign_context), 'membership suspension selectively revokes A while B context survives')
+    for client, unused in clients:
+        with client.open(URL + '/api/auth/core/session', timeout=10) as response:
+            check(json.load(response)['authenticated'], 'global holder session preserved')
+    mutate('reactivate')
+    check(revoked(matrix_context) and revoked(second_context), 'reactivation does not restore historical contexts')
+    new_matrix = select_context(0, tenant, branches[0])
+    new_second = select_context(1, tenant, branches[1])
+    branch_member = next(b['id'] for b in get(path + '/access')['branches'] if b['branchId'] == branches[1])
+    mutate('suspend', branch_member)
+    check(revoked(new_second) and not revoked(new_matrix) and not revoked(foreign_context), 'individual branch suspension preserves matrix and other company')
+    mutate('reactivate', branch_member)
+    check(revoked(new_second), 'branch reactivation requires new context selection')
+    select_context(1, tenant, branches[1])
+    check(cluster.query("SELECT count(*) FROM catalog.applications WHERE code IN ('f35-fiscal','f35-pos')") == '0', 'Core pilot generated no Fiscal/POS business fixture')
 
 
 def check_branch_read(cluster, tenant_id, branch_id, username, password):
@@ -322,9 +411,11 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
+                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_TENANTACCESS_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
-                for prefix, role in [('LS_IDENTITY_LINKS_DB_', 'ls_core_identity_links_dev'),
+                for prefix, role in [('LS_TENANT_ACCESS_DB_', 'ls_core_tenant_access_dev'),
+                                     ('LS_TENANT_ACCESS_LOG_DB_', 'ls_core_tenant_access_log_dev'),
+                                     ('LS_IDENTITY_LINKS_DB_', 'ls_core_identity_links_dev'),
                                      ('LS_IDENTITY_LINKS_LOG_DB_', 'ls_core_identity_links_log_dev'),
                                      ('LS_TENANT_USERS_DB_', 'ls_core_tenant_users_dev'),
                                      ('LS_TENANT_USERS_LOG_DB_', 'ls_core_tenant_users_log_dev'),
@@ -378,7 +469,7 @@ def main():
             if options.core:
                 print('LS CORE: ' + URL + '/core | OWNER: ' + core_username + ' | Administrador inicial disponible: ' + initial_username + ' | Segundo candidato: ' + username, flush=True)
             if options.smoke_only and options.core:
-                core_smoke(opener, core_username, initial_username, username, password, cluster)
+                core_smoke(opener, core_username, initial_username, username, password, cluster, ssl_context)
             elif options.smoke_only:
                 # New proxy/provisioning smoke only; never invokes historical JUnit integration methods.
                 request = urllib.request.Request(URL + '/api/auth/fiscal/login', method='POST',
@@ -402,7 +493,7 @@ def main():
                 check(opener.open(request, timeout=10).status == 204, 'real logout through proxy')
             elif options.core:
                 print('Catalogo real sin contratos especializados. Para un ejemplo NO PRODUCTIVO, crea y activa una empresa en la UI.', flush=True)
-                print('Comando: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir. El fixture se instala solo en esa empresa del cluster desechable.', flush=True)
+                print('Comando: fixture-config <UUID_EMPRESA> | fixture-history <UUID_EMPRESA> | fixture-access <UUID_EMPRESA> <UUID_MEMBRESIA> <UUID_SUCURSAL> | check-branch <UUID_EMPRESA> <UUID_SUCURSAL> | salir. Solo cluster desechable.', flush=True)
                 while all(child.poll() is None for child in children):
                     command = input('Piloto Core> ').strip()
                     if command == 'salir':
@@ -412,6 +503,12 @@ def main():
                             install_history_fixture(cluster, command.removeprefix('fixture-history ').strip())
                         except (ValueError, AssertionError):
                             print('History fixture unavailable or already installed.', flush=True)
+                    elif command.startswith('fixture-access '):
+                        try:
+                            selected_tenant, selected_member, selected_branch = command.removeprefix('fixture-access ').split()
+                            install_access_assignment(cluster, selected_tenant, selected_member, selected_branch)
+                        except (ValueError, AssertionError):
+                            print('Access fixture unavailable, invalid state or already assigned.', flush=True)
                     elif command.startswith('check-branch '):
                         try:
                             selected_tenant, selected_branch = command.removeprefix('check-branch ').split()
