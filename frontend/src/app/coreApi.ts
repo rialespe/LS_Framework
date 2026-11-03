@@ -18,6 +18,14 @@ async function request<T>(action: string, body?: unknown, resultBody = false): P
   return result as T
 }
 export const coreApi = {
+  assignmentWorkspace: (tenant: string, app: string, member: string) => request<AssignmentWorkspace>(assignmentPath(tenant, app) + '/members/' + encodeURIComponent(member)),
+  assignmentPreview: (tenant: string, app: string, member: string, branchMember: string) => request<EffectivePermission[]>(assignmentPath(tenant, app) + '/members/' + encodeURIComponent(member) + '/branches/' + encodeURIComponent(branchMember) + '/preview'),
+  assignmentMutation: (tenant: string, app: string, action: AssignmentAction, input: AssignmentInput, requestId: string, password: string) => request<AssignmentResult>(assignmentPath(tenant, app) + '/commands/' + action, { ...input, requestId, password }, true),
+  assignmentReceipt: (id: string) => request<AssignmentResult>('rbac/assignments/operations/' + encodeURIComponent(id)),
+  contextTenants: () => request<{ id: string; name: string }[]>('rbac/context/tenants'),
+  contextBranches: (tenant: string) => request<{ id: string; name: string; code: string }[]>('rbac/context/tenants/' + encodeURIComponent(tenant) + '/branches'),
+  contextSelect: (tenantId: string, branchId: string) => request<OwnContext>('rbac/context', { tenantId, branchId }),
+  contextPermissions: async () => (await request<OwnContext | undefined>('rbac/context/permissions')) ?? null,
   rbacTenants: () => request<{ id: string; name: string; status: string }[]>('rbac/tenants'),
   rbacApplications: (tenant: string) => request<RbacApplication[]>('rbac/tenants/' + encodeURIComponent(tenant) + '/applications'),
   rbacWorkspace: (tenant: string, application: string) => request<RbacWorkspace>(rbacPath(tenant, application)),
@@ -136,3 +144,12 @@ export type RbacResult = { outcome: string; correlation: string; receipt: RbacRe
 export type RbacPermission = { id: string; moduleId: string | null; code: string; name: string; scope: string; status: string; privilegeKind: string | null; delegable: boolean }
 export type RbacTemplate = { id: string; code: string; name: string; version: number; items: string[]; delegable: boolean }
 export type RbacWorkspace = { canManage: boolean; modules: { id: string; code: string; name: string; status: string }[]; permissions: RbacPermission[]; roleTemplates: RbacTemplate[]; profileTemplates: RbacTemplate[]; roles: RbacResource[]; profiles: RbacResource[]; history: RbacReceipt[] }
+
+const assignmentPath = (tenant: string, app: string) => 'rbac/assignments/tenants/' + encodeURIComponent(tenant) + '/applications/' + encodeURIComponent(app)
+export type AssignmentAction = 'join-branch' | 'assign' | 'revoke'
+export type AssignmentInput = { membershipId: string; branchId: string; branchMembershipId: string | null; assignmentId: string | null; expectedUpdatedAt: string | null; expectedRevision: number | null; profileIds: string[] }
+export type EffectivePermission = { id: string; code: string; name: string; resource_scope: string; operation_kind: string; module_id: string | null }
+export type AssignmentReceipt = { requestId: string; tenantId: string; applicationId: string; membershipId: string; action: string; createdAt: string; result: { revokedContexts: number; branchMembershipId: string; action: string } }
+export type AssignmentResult = { outcome: string; correlation: string; receipt: AssignmentReceipt | null }
+export type AssignmentWorkspace = { canManage: boolean; member: { id: string; name: string; status: string }; branches: { id: string; code: string; name: string; status: string; branchMembershipId: string | null; accessStatus: string | null; updatedAt: string | null }[]; profiles: { id: string; code: string; name: string; status: string; assignable: boolean; permissions: { id: string; code: string; scope: string; operationKind: string | null; contextMode: string | null }[] }[]; assignments: { id: string; profile_id: string; branch_membership_id: string; status: string; revoked_at: string | null; created_at: string; revision: number }[]; history: AssignmentReceipt[] }
+export type OwnContext = { id: string; tenantId: string; applicationId: string; branchId: string; permissions: { id: string; code: string; resourceScope: string; operationKind: string }[] }

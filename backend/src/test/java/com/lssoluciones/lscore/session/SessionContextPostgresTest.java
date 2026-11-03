@@ -63,6 +63,8 @@ class SessionContextPostgresTest {
             try (var input = getClass().getResourceAsStream("/session-context-fixture.sql")) {
                 sql.execute(new String(input.readAllBytes(), StandardCharsets.UTF_8).replace("__USER__", user.toString()));
             }
+            // Explicit synthetic semantics: p70 tests WRITE rejection in a READ_ONLY module.
+            sql.execute("DO $$ BEGIN IF to_regclass('platform.permission_execution_rules') IS NOT NULL THEN INSERT INTO platform.permission_execution_rules SELECT application_id,id,CASE WHEN code='p70' THEN 'WRITE' ELSE 'READ' END,'SINGLE_BRANCH' FROM security.permissions WHERE id::text LIKE '35000000-%'; END IF; END $$");
             var properties = new HashMap<String, Object>();
             properties.put("ls.identity.credentials.enabled", "true");
             properties.put("ls.login.enabled", "true");

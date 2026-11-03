@@ -132,6 +132,14 @@ public final class JdbcApplicationSessions {
     }
 
     <T> T withSession(LoginApplication application, String token, SessionWork<T> work) {
+        return withSession(application, token, work, false);
+    }
+
+    <T> T withContextSession(LoginApplication application, String token, SessionWork<T> work) {
+        return withSession(application, token, work, true);
+    }
+
+    private <T> T withSession(LoginApplication application, String token, SessionWork<T> work, boolean context) {
         if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) {
             throw new Rejected();
         }
@@ -148,7 +156,7 @@ public final class JdbcApplicationSessions {
             }
             // Acquire before the repeatable snapshot. Physical close releases this shared admission barrier.
             // Core administration uses a separate writer and must never take this shared lock.
-            if (application != LoginApplication.CORE) {
+            if (context || application != LoginApplication.CORE) {
                 try (var barrier = connection.createStatement()) {
                     barrier.setQueryTimeout(5);
                     barrier.execute("SELECT pg_advisory_lock_shared(370019,1)");

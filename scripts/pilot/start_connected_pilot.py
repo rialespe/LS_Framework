@@ -1,4 +1,4 @@
-"""Windows loopback pilot: owned PG17, V1-V31, real F04 account, trusted TLS and Vite.
+"""Windows loopback pilot: owned PG17, V1-V32, real F04 account, trusted TLS and Vite.
 
 No existing server URL, database password or data directory can be supplied.
 Interactive by default. --smoke-only checks the new HTTPS proxy path and then removes everything.
@@ -27,7 +27,7 @@ FRONTEND = ROOT / 'frontend'
 URL = 'https://127.0.0.1:5174'
 
 
-def prepare_database(cluster, version=31):
+def prepare_database(cluster, version=32):
     prepare_fixture(cluster)
     for database in ('postgres', 'template1'):
         check(cluster.psql(sql=f'REVOKE CONNECT,TEMPORARY ON DATABASE {database} FROM PUBLIC').returncode == 0,
@@ -56,7 +56,8 @@ def prepare_database(cluster, version=31):
             (['ls_core_tenant_users_dev', 'ls_core_tenant_users_log_dev'], 'prepare_tenant_users.sql', '28'),
             (['ls_core_identity_links_dev', 'ls_core_identity_links_log_dev'], 'prepare_identity_links.sql', '29'),
             (['ls_core_tenant_access_dev', 'ls_core_tenant_access_log_dev'], 'prepare_tenant_access.sql', '30'),
-            (['ls_core_tenant_rbac_dev', 'ls_core_tenant_rbac_log_dev'], 'prepare_tenant_rbac.sql', '31')]:
+            (['ls_core_tenant_rbac_dev', 'ls_core_tenant_rbac_log_dev'], 'prepare_tenant_rbac.sql', '31'),
+            (['ls_core_profile_assignments_dev', 'ls_core_profile_assignments_log_dev', 'ls_core_context_permissions_dev'], 'prepare_profile_assignments.sql', '32')]:
         if int(target) > version:
             break
         reply = ''
@@ -85,6 +86,8 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
         check(response.status == 200, 'Core React form transforms through Vite')
     with opener.open(URL + '/src/app/TenantRbac.tsx', timeout=5) as response:
         check(response.status == 200, 'connected RBAC workspace transforms through real Vite HTTPS')
+    with opener.open(URL + '/src/app/ProfileAssignments.tsx', timeout=5) as response:
+        check(response.status == 200, 'connected branch profile panel transforms through real Vite HTTPS')
     with post('login', {'username': username, 'password': password}) as response:
         check(response.status == 204, 'real independent Core HTTPS login')
     check(get('authority')['canRegister'], 'real global registration authority')
@@ -179,6 +182,7 @@ def core_smoke(opener, username, initial_username, second_username, password, cl
         check(get('branch-administration/operations/' + operation)['outcome'] == 'CONFIRMED', 'branch creation receipt persisted')
     access_lifecycle_smoke(cluster, ssl_context, post, get, tenant_id, link_tenant, branches, member_id, new_username, password)
     rbac_smoke(cluster, post, get, tenant_id, password)
+    profile_assignments_smoke(cluster, ssl_context, post, get, tenant_id, link_tenant, branches, member_id, new_username, password)
     install_history_fixture(cluster, tenant_id)
     check(check_branch_read(cluster, tenant_id, branches[1], username, password), 'ACTIVE bounded read permitted')
     for action, state in [('suspend', 'SUSPENDED'), ('reactivate', 'ACTIVE'), ('close', 'CLOSED')]:
@@ -271,6 +275,14 @@ END $$; COMMIT;""".replace('__TENANT__', tenant)
     for permission in permissions:
         install('grant_tenant_rbac_permission.sql', {'tenant_id': tenant, 'application_id': app, 'permission_id': permission['id'],
                 'privilege_kind': 'WRITE' if permission['code'] in ('roles.manage', 'profiles.manage', 'assignments.manage') else 'READ', 'expires_at': expires})
+    for permission in permissions:
+        kind = 'WRITE' if permission['code'] in ('roles.manage', 'profiles.manage', 'assignments.manage') else 'READ'
+        mode = 'RESERVED' if permission['code'] == 'consolidated.read' else 'SINGLE_BRANCH'
+        existing = json.loads(cluster.query("SELECT coalesce(json_agg(json_build_object('kind',operation_kind,'mode',context_mode)),'[]') FROM platform.permission_execution_rules WHERE application_id='" + app + "' AND permission_id='" + permission['id'] + "'"))
+        if existing:
+            check(existing == [{'kind': kind, 'mode': mode}], 'existing platform semantics match explicit owned fixture')
+        else:
+            install('set_permission_execution_rule.sql', {'application_id': app, 'permission_id': permission['id'], 'operation_kind': kind, 'context_mode': mode})
     designations = json.loads(cluster.query("SELECT json_agg(id) FROM tenant.valid_administrators('" + tenant + "')"))
     check(bool(designations), 'valid tenant administrators selected by PostgreSQL')
     for designation in designations:
@@ -318,6 +330,79 @@ def rbac_smoke(cluster, post, get, tenant, password):
     check(cluster.query('SELECT count(*) FROM security.branch_profile_assignments') == before, 'RBAC initialization created no branch profile assignments')
 
 
+def profile_assignments_smoke(cluster, ssl_context, post, get, tenant, other, branches, member, username, password):
+    """Real Core assignments, three independent holder cookies and authoritative permission projections."""
+    import uuid
+    app = '3bc09866-f9f0-573c-82a0-fd72ec6be41f'
+    install_rbac_fixture(cluster, other)
+    other_member = next(u['id'] for u in get('tenant-users/tenants/' + other + '/users')['users'] if u['username'] == username)
+    other_branch = get('branch-administration/tenants/' + other + '/branches')['branches'][0]['id']
+    with post('rbac/tenants/' + other + '/applications/' + app + '/commands/profile-template',
+              {'requestId': str(uuid.uuid4()), 'templateId': 'a2ff7d6a-ded6-5fdc-81e7-8e103dde3f77', 'password': password}) as response:
+        check(json.load(response)['outcome'] == 'CONFIRMED', 'explicit second company profile materialization')
+    def workspace(company, membership):
+        return get('rbac/assignments/tenants/' + company + '/applications/' + app + '/members/' + membership)
+    def mutate(company, membership, branch, action, profiles=None, assignment=None):
+        state = workspace(company, membership)
+        access = next(b for b in state['branches'] if b['id'] == branch)
+        request = str(uuid.uuid4())
+        values = {'requestId': request, 'membershipId': membership, 'branchId': branch,
+                  'branchMembershipId': access['branchMembershipId'], 'expectedUpdatedAt': access['updatedAt'],
+                  'profileIds': profiles or [], 'password': password}
+        if assignment:
+            values.update(assignmentId=assignment['id'], expectedRevision=assignment['revision'])
+        with post('rbac/assignments/tenants/' + company + '/applications/' + app + '/commands/' + action, values) as response:
+            check(json.load(response)['outcome'] == 'CONFIRMED', 'real HTTPS profile ' + action)
+        check(get('rbac/assignments/operations/' + request)['outcome'] == 'CONFIRMED', 'assignment receipt persists')
+    state = workspace(tenant, member)
+    reader = next(p['id'] for p in state['profiles'] if p['code'] == 'lector_sucursal_v1')
+    editor = next(p['id'] for p in state['profiles'] if p['code'] == 'editor_accesos_v1')
+    reader_b = next(p['id'] for p in workspace(other, other_member)['profiles'] if p['code'] == 'lector_sucursal_v1')
+    mutate(tenant, member, branches[0], 'assign', [reader, editor])
+    mutate(tenant, member, branches[1], 'assign', [reader])
+    mutate(other, other_member, other_branch, 'assign', [reader_b])
+    clients = []
+    for unused in range(3):
+        jar = http.cookiejar.CookieJar()
+        client = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context), urllib.request.HTTPCookieProcessor(jar))
+        def holder_post(path, data, client=client):
+            with client.open(URL + '/api/auth/core/csrf', timeout=10) as response:
+                csrf = json.load(response)['csrfToken']
+            return client.open(urllib.request.Request(URL + '/api/auth/core/' + path, method='POST',
+                               data=json.dumps(data).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf}), timeout=15)
+        with holder_post('login', {'username': username, 'password': password}):
+            pass
+        clients.append((client, holder_post))
+    contexts = []
+    for index, (company, branch) in enumerate(((tenant, branches[0]), (tenant, branches[1]), (other, other_branch))):
+        with clients[index][1]('rbac/context', {'tenantId': company, 'branchId': branch}) as response:
+            contexts.append(json.load(response))
+    matrix_codes = {p['code'] for p in contexts[0]['permissions']}
+    check(len(matrix_codes) == len(contexts[0]['permissions']) and 'assignments.manage' in matrix_codes, 'multiple profile union is distinct in the selected branch')
+    check('assignments.manage' not in {p['code'] for p in contexts[1]['permissions']} and 'assignments.manage' not in {p['code'] for p in contexts[2]['permissions']}, 'no branch or tenant inheritance')
+    check('consolidated.read' not in matrix_codes, 'no consolidated operational permission')
+    state = workspace(tenant, member)
+    access = next(b for b in state['branches'] if b['id'] == branches[0])
+    assignment = next(a for a in state['assignments'] if a['branch_membership_id'] == access['branchMembershipId'] and a['profile_id'] == editor and a['status'] == 'ACTIVE')
+    mutate(tenant, member, branches[0], 'revoke', assignment=assignment)
+    for index, (client, unused) in enumerate(clients):
+        with client.open(URL + '/api/auth/core/rbac/context/permissions', timeout=10) as response:
+            value = None if response.status == 204 else json.load(response)
+        check((value is None) if index == 0 else value['id'] == contexts[index]['id'], 'selective revocation preserves other branch and company contexts')
+    mutate(tenant, member, branches[0], 'assign', [editor])
+    check(cluster.query("SELECT revoked_at IS NOT NULL FROM security.session_contexts WHERE id='" + contexts[0]['id'] + "'") == 't', 'reassignment never restores historical contexts')
+    try:
+        mutate(tenant, member, branches[0], 'assign', [reader_b])
+        raise RuntimeError('Foreign profile must be denied')
+    except urllib.error.HTTPError as rejected:
+        check(rejected.code == 403, 'foreign profile denied through HTTPS')
+        rejected.close()
+    check(len(workspace(tenant, member)['history']) >= 5, 'administrative history persisted in PostgreSQL')
+    for client, holder_post in clients:
+        with holder_post('logout', {}):
+            pass
+
+
 def install_access_assignment(cluster, tenant, membership, branch):
     """One explicit development assignment, only in this process's disposable cluster."""
     import uuid
@@ -340,18 +425,17 @@ def access_lifecycle_smoke(cluster, ssl_context, post, get, tenant, other, branc
     with post('branch-administration/tenants/' + other + '/branches', {'requestId': str(uuid.uuid4()), 'code': 'CASA MATRIZ', 'name': 'CASA MATRIZ', 'password': password}) as response:
         foreign_branch = json.load(response)['change']['branch']['id']
     foreign_member = next(u['id'] for u in get('tenant-users/tenants/' + other + '/users')['users'] if u['username'] == username)
-    for company, membership, selected in [(tenant, member, branches), (other, foreign_member, [foreign_branch])]:
-        company, membership = str(uuid.UUID(company)), str(uuid.UUID(membership))
-        for branch in selected:
-            branch = str(uuid.UUID(branch))
-            check(cluster.psql(sql="INSERT INTO tenant.branch_memberships(tenant_id,membership_id,branch_id,status) SELECT tenant_id,id,'" + branch + "','ACTIVE' FROM tenant.memberships WHERE tenant_id='" + company + "' AND id='" + membership + "'").returncode == 0,
-                  'DISPOSABLE ONLY: explicit existing branch assignment; no new profiles or permissions')
     app = cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core'")
     branches_module = cluster.query("SELECT id FROM catalog.modules WHERE application_id='" + app + "' AND code='branches'")
     for company in (tenant, other):
         # No silent adoption: an unexpected preexisting entitlement fails this owned fixture.
         check(cluster.psql(sql="INSERT INTO catalog.tenant_applications(tenant_id,application_id,status) VALUES('" + company + "','" + app + "','ACTIVE'); INSERT INTO catalog.tenant_modules(tenant_id,application_id,module_id,status) VALUES('" + company + "','" + app + "','" + branches_module + "','ACTIVE')").returncode == 0,
               'disposable Core-only context eligibility')
+    for company, membership, selected in [(tenant, member, branches), (other, foreign_member, [foreign_branch])]:
+        for branch in selected:
+            with post('rbac/assignments/tenants/' + company + '/applications/' + app + '/commands/join-branch',
+                      {'requestId': str(uuid.uuid4()), 'membershipId': membership, 'branchId': branch, 'profileIds': [], 'password': password}) as response:
+                check(json.load(response)['outcome'] == 'CONFIRMED', 'explicit authorized V32 incorporation; no automatic profiles')
     clients = []
     for unused in range(3):
         jar = http.cookiejar.CookieJar()
@@ -501,9 +585,11 @@ def main():
                 env.update({prefix + 'HOST': '127.0.0.1', prefix + 'PORT': str(cluster.port), prefix + 'NAME': 'ls_core_dev',
                             prefix + 'PASSWORD': cluster.secrets[role]})
             if options.core:
-                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_TENANTRBAC_ENABLED='true', LS_CORE_TENANTACCESS_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
+                env.update(LS_IDENTITY_PASSWORD_LIFECYCLE_ENABLED='true', LS_CORE_PROFILEASSIGNMENTS_ENABLED='true', LS_CORE_TENANTRBAC_ENABLED='true', LS_CORE_TENANTACCESS_ENABLED='true', LS_CORE_IDENTITYLINKS_ENABLED='true', LS_CORE_TENANTUSERS_ENABLED='true', LS_LOGIN_CORE_ENABLED='true', LS_CORE_REGISTRATION_ENABLED='true', LS_CORE_LIFECYCLE_ENABLED='true', LS_CORE_ADMINISTRATORS_ENABLED='true', LS_CORE_BRANCHES_ENABLED='true', LS_CORE_BRANCHCONFIGURATION_ENABLED='true', LS_CORE_BRANCHHISTORY_ENABLED='true',
                            LS_LOGIN_CORE_APPLICATION_ID=cluster.query("SELECT id FROM catalog.applications WHERE code='ls-core' AND status='PUBLISHED'"))
-                for prefix, role in [('LS_TENANT_RBAC_DB_', 'ls_core_tenant_rbac_dev'),
+                for prefix, role in [('LS_PROFILE_ASSIGNMENTS_DB_', 'ls_core_profile_assignments_dev'),
+                                     ('LS_PROFILE_ASSIGNMENTS_LOG_DB_', 'ls_core_profile_assignments_log_dev'),
+                                     ('LS_TENANT_RBAC_DB_', 'ls_core_tenant_rbac_dev'),
                                      ('LS_TENANT_RBAC_LOG_DB_', 'ls_core_tenant_rbac_log_dev'),
                                      ('LS_TENANT_ACCESS_DB_', 'ls_core_tenant_access_dev'),
                                      ('LS_TENANT_ACCESS_LOG_DB_', 'ls_core_tenant_access_log_dev'),
